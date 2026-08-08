@@ -1,0 +1,83 @@
+<form class="filters"
+      hx-get="/ui/defects"
+      hx-target="#defect-panel"
+      hx-trigger="change">
+  <label>
+    <span>Namespace</span>
+    <select name="namespace">
+      <option value="">All namespaces</option>
+      {% for ns in namespaces %}
+      <option value="{{ ns }}" {% if ns == filter_namespace %}selected{% endif %}>{{ ns }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>
+    <span>Severity</span>
+    <select name="severity">
+      <option value="">All severities</option>
+      <option value="critical" {% if filter_severity == 'critical' %}selected{% endif %}>Critical</option>
+      <option value="warning" {% if filter_severity == 'warning' %}selected{% endif %}>Warning</option>
+    </select>
+  </label>
+  <label>
+    <span>Source</span>
+    <select name="source">
+      <option value="">All sources</option>
+      <option value="cluster" {% if filter_source == 'cluster' %}selected{% endif %}>Cluster scan</option>
+      <option value="node-agent" {% if filter_source == 'node-agent' %}selected{% endif %}>Node agent</option>
+    </select>
+  </label>
+  <label>
+    <span>Type</span>
+    <select name="type">
+      <option value="">All types</option>
+      {% for t in types %}
+      <option value="{{ t }}" {% if t == filter_type %}selected{% endif %}>{{ t }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <span class="filters-count">{{ defects | length }} shown</span>
+</form>
+
+{% if defects %}
+<table class="defects">
+  <thead>
+    <tr>
+      <th class="col-sev">Severity</th>
+      <th class="col-type">Type</th>
+      <th class="col-res">Resource</th>
+      <th>Message</th>
+      <th class="col-age">Detected</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for d in defects %}
+    <tr class="defect-row"
+        hx-get="/ui/defects/{{ d.id }}"
+        hx-target="#drawer-body"
+        onclick="openDrawer()"
+        tabindex="0">
+      <td><span class="pill pill-{{ d.severity.value }}">{{ d.severity.value }}</span></td>
+      <td>
+        <code class="type">{{ d.type }}</code>
+        {% if d.source.value == 'node-agent' %}<span class="tag tag-node">node</span>{% endif %}
+        {% if d.llm_enriched %}<span class="tag tag-llm">claude</span>{% endif %}
+      </td>
+      <td class="resource">
+        <span class="kind">{{ d.kind }}</span>
+        <span class="name">{{ (d.namespace ~ '/') if d.namespace else '' }}{{ d.name }}</span>
+      </td>
+      <td class="message">{{ d.message }}</td>
+      <td class="age">
+        <time datetime="{{ d.detected_at.isoformat() }}">{{ d.detected_at.strftime('%H:%M:%SZ') }}</time>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty">
+  <span class="empty-mark">&#10003;</span>
+  <p>No defects match the current filters.</p>
+</div>
+{% endif %}

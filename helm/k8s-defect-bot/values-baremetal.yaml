@@ -1,0 +1,272 @@
+# Production values for k8s-defect-bot on a bare-metal / self-managed cluster
+# (kubeadm, k3s, RKE2, MicroK8s -- your own hardware or VMs).
+#
+# Copy this file, replace every REPLACE-ME, and install with:
+#
+#   helm upgrade --install k8s-defect-bot ./helm/k8s-defect-bot \
+#     --namespace k8s-defect-bot --create-namespace \
+#     -f my-baremetal-values.yaml
+#
+# Use "k8s-defect-bot" as the release name. The chart names resources after the
+# release unless the release name already contains the chart name -- so this one
+# gives you a Deployment called exactly "k8s-defect-bot" rather than
+# "<release>-k8s-defect-bot", which is what usage.md's commands assume.
+#
+# The EKS equivalent is values-production.yaml. The differences that matter are
+# marked BARE METAL below -- the runtime socket is the one that breaks a cluster
+# quietly if you skip it.
+#
+# NOTE ON SECRETS: this file holds no passwords. Credentials come from Secrets
+# you create separately (see usage.md step 3), which keeps them out of git and
+# out of shell history.
+
+# ---------------------------------------------------------------------------
+# Image
+# ---------------------------------------------------------------------------
+# With a registry, use its full path. With no registry, side-load the image onto
+# every node (usage.md step 2) and use a bare name with pullPolicy: IfNotPresent
+# -- the DaemonSet means EVERY node needs the image, not just one.
+image:
+  repository: REPLACE-ME.internal.example.com/k8s-defect-bot
+  tag: "0.3.0"
+  pullPolicy: IfNotPresent
+
+# Only needed for a registry that requires credentials or a private CA.
+# imagePullSecrets:
+#   - name: regcred
+
+# ---------------------------------------------------------------------------
+# Identity of this deployment
+# ---------------------------------------------------------------------------
+config:
+  # Appears in the dashboard header and EVERY email subject. Make it
+  # unambiguous -- this is what tells you which cluster paged you.
+  clusterName: REPLACE-ME-dc1-prod
+  # Where people actually reach the dashboard. Turns notification emails from
+  # informational into actionable.
+  dashboardUrl: https://REPLACE-ME.internal.example.com
+
+  scanIntervalSeconds: 300
+  namespaceFilter: ""
+  logLevel: INFO
+
+  nodeReportTtlSeconds: 900
+  # BARE METAL: node clocks are your own problem here -- there is no Amazon Time
+  # Sync quietly keeping them right. Leave this check on; it is one of the
+  # cheapest ways to catch a node whose NTP died months ago.
+  clockSkewWarnSeconds: 60
+
+  # 'missing_resource_limits' is the noisiest rule on a cluster that has not
+  # adopted limits yet. Drop it from this list rather than letting people learn
+  # to ignore the dashboard.
+  enabledRules:
+    - crashloopbackoff
+    - imagepullbackoff
+    - pending_pods
+    - oomkilled
+    - failing_probes
+    - high_restart_count
+    - node_pressure
+    - node_not_ready
+    - warning_events
+    - missing_resource_limits
+    - pvc_binding_failures
+    - service_port_mismatch
+    - deprecated_apis
+
+# ---------------------------------------------------------------------------
+# Who may sign in, and who gets the mail
+# ---------------------------------------------------------------------------
+auth:
+  enabled: true
+  existingSecret: k8s-defect-bot-users
+  # Set true only once you actually serve HTTPS. On a NodePort deployment over
+  # plain HTTP, true means the browser never sends the cookie back and nobody
+  # can stay signed in.
+  sessionCookieSecure: true
+  sessionTtlSeconds: 43200          # 12h
+  sessionIdleTimeoutSeconds: 3600   # 1h
+  loginMaxAttempts: 5
+  loginLockoutSeconds: 300
+
+# ---------------------------------------------------------------------------
+# Email notifications
+# ---------------------------------------------------------------------------
+notifications:
+  enabled: true
+  smtp:
+    # BARE METAL: your own relay. For an internal relay that accepts
+    # unauthenticated mail from the cluster network, drop existingSecret and set
+    # port: 25 with starttls: false.
+    host: REPLACE-ME-smtp.internal.example.com
+    port: 587
+    starttls: true
+    existingSecret: k8s-defect-bot-smtp
+  from: k8s-defect-bot@example.com
+  fromName: k8s-defect-bot
+
+  minSeverity: critical
+  maxEmailsPerHour: 10
+  digestIntervalSeconds: 3600
+  baselineFirstScan: true
+  maxDefectsPerEmail: 25
+
+# ---------------------------------------------------------------------------
+# Node agents
+# ---------------------------------------------------------------------------
+nodeAgent:
+  enabled: true
+  intervalSeconds: 120
+  # Monitoring is only useful if it also runs on the nodes people taint --
+  # including control-plane nodes, which on a self-managed cluster are yours to
+  # watch too.
+  tolerateAll: true
+  enabledChecks:
+    - node_disk_usage
+    - node_inode_usage
+    - node_memory_available
+    - node_load_average
+    - node_pid_usage
+    - node_conntrack_usage
+    - node_kubelet_health
+    - node_container_runtime
+    - node_dns_resolution
+    - node_apiserver_reachable
+    # node_kernel_errors needs privileged: true below -- opt in deliberately.
+  privileged: false
+
+  # BARE METAL: THE setting to get right. The default below is correct for
+  # kubeadm and most containerd installs. If yours differs, every node reports
+  # node_container_runtime as critical until you fix it:
+  #
+  #   kubeadm / plain containerd   /run/containerd/containerd.sock   (default)
+  #   k3s and RKE2                 /run/k3s/containerd/containerd.sock
+  #   MicroK8s                     /var/snap/microk8s/common/run/containerd.sock
+  #   CRI-O                        /var/run/crio/crio.sock
+  #   Docker via cri-dockerd       /var/run/cri-dockerd.sock
+  #
+  # Confirm on a node with:  sudo ls -l /run/containerd/containerd.sock
+  containerRuntimeSocket: "/run/containerd/containerd.sock"
+
+  # Kubelet's healthz. 10248 is the default on every distribution; change it only
+  # if you set --healthz-port yourself.
+  kubeletHealthzUrl: "http://127.0.0.1:10248/healthz"
+  dnsProbeHost: "kubernetes.default.svc.cluster.local"
+
+  thresholds:
+    diskWarnPercent: 80
+    diskCriticalPercent: 90
+    memoryWarnPercent: 85
+    loadPerCpuWarn: 2.0
+    pidWarnPercent: 80
+    conntrackWarnPercent: 80
+  resources:
+    requests:
+      cpu: 10m
+      memory: 48Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+# ---------------------------------------------------------------------------
+# Claude analysis -- off by default; see usage.md before enabling in-cluster
+# ---------------------------------------------------------------------------
+llm:
+  provider: none
+  # An air-gapped cluster cannot reach api.anthropic.com at all. Run the
+  # collector on your own machine when you want a deeper read -- usage.md
+  # Option A -- and leave this at none.
+
+# ---------------------------------------------------------------------------
+# Exposure
+# ---------------------------------------------------------------------------
+# BARE METAL: there is no cloud load balancer. Pick one:
+#
+#   1. ingress-nginx (below)  -- best if you already run an ingress controller
+#   2. MetalLB                -- service.type: LoadBalancer, address from its pool
+#   3. NodePort               -- no extra components; port is assigned from
+#                                30000-32767 and you reach it at <node-ip>:<port>
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  className: nginx
+  host: REPLACE-ME.internal.example.com
+  path: /
+  pathType: Prefix
+  annotations:
+    # cert-manager issues and renews the certificate into the Secret named below.
+    cert-manager.io/cluster-issuer: REPLACE-ME-internal-issuer
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  tls:
+    - hosts:
+        - REPLACE-ME.internal.example.com
+      secretName: k8s-defect-bot-tls
+
+# ---------------------------------------------------------------------------
+# Restrict who can reach the collector
+# ---------------------------------------------------------------------------
+# Requires a CNI that enforces NetworkPolicy (Calico, Cilium, Antrea). Flannel
+# alone does NOT -- the policy will apply cleanly and enforce nothing.
+networkPolicy:
+  enabled: true
+  # REQUIRED: the node agents use hostNetwork, so they arrive from the node's
+  # address. Without these CIDRs the policy locks every agent out and /api/nodes
+  # is simply empty. Find your node subnet with:
+  #   kubectl get nodes -o wide      # read the INTERNAL-IP column
+  nodeCidrs:
+    - REPLACE-ME/24      # e.g. 192.168.10.0/24 -- the subnet your nodes sit on
+  allowFrom:
+    # Your ingress controller's namespace.
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+# Sized for a few hundred pods. On a cluster with thousands, watch memory during
+# the first few scans and raise the limit -- a whole snapshot is held at once.
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+# Findings and sessions live in memory, so this MUST stay 1. See usage.md.
+replicaCount: 1
+
+serviceAccount:
+  create: true
+  annotations: {}
+
+rbac:
+  create: true
+  # Only useful on clusters older than 1.22. Harmless but pointless otherwise.
+  includeLegacyExtensions: false
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+nodeSelector: {}
+affinity: {}
+
+# On a single-node cluster the control plane is usually tainted, and the
+# collector has nowhere else to go. Uncomment to let it schedule there.
+# tolerations:
+#   - key: node-role.kubernetes.io/control-plane
+#     operator: Exists
+#     effect: NoSchedule
+tolerations: []

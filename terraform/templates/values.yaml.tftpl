@@ -1,0 +1,88 @@
+# Helm values for the test cluster, rendered by Terraform.
+# These are test-environment choices, not production ones -- see the notes.
+
+image:
+  repository: k8s-defect-bot
+  tag: "${image_tag}"
+  # The image is built on this node and imported straight into k3s containerd,
+  # so there is no registry to pull from.
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+config:
+  clusterName: ${cluster_name}
+  dashboardUrl: http://${dashboard_host}
+  # Shorter than the 300s default so the cluster reacts while you are watching.
+  scanIntervalSeconds: ${scan_interval}
+  logLevel: INFO
+
+auth:
+  enabled: true
+  # NOT production: the password is passed in plaintext and the app hashes it at
+  # load, logging a warning as it does. Production uses password_hash via
+  # auth.existingSecret -- see usage.md step 3a.
+  users:
+    - email: ${admin_email}
+      name: Test admin
+      role: admin
+      password: "${admin_password}"
+      notify:
+        mode: "off"
+  # The dashboard is served over plain HTTP here. With this true the browser
+  # would accept the session cookie and refuse to send it back, so sign-in would
+  # appear to succeed and then immediately fail.
+  sessionCookieSecure: false
+
+notifications:
+  enabled: false
+
+llm:
+  provider: none
+
+nodeAgent:
+  enabled: true
+  intervalSeconds: ${agent_interval}
+  # k3s does NOT use /run/containerd/containerd.sock. Without this override the
+  # node_container_runtime check reports critical on every node.
+  containerRuntimeSocket: /run/k3s/containerd/containerd.sock
+  tolerateAll: true
+  resources:
+    requests:
+      cpu: 10m
+      memory: 48Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+service:
+  type: ClusterIP
+  port: 80
+
+# k3s bundles Traefik, so an Ingress is the least-effort way to get a real URL.
+# nip.io resolves <ip>.nip.io to that IP, which avoids needing a DNS record.
+ingress:
+  enabled: true
+  className: traefik
+  host: ${dashboard_host}
+  path: /
+  pathType: Prefix
+
+# k3s ships Flannel, which does not enforce NetworkPolicy -- enabling it here
+# would give the appearance of protection and none of the substance. The
+# security group is what actually restricts access to this cluster.
+networkPolicy:
+  enabled: false
+
+# Sized for a 2 GiB node also running k3s and a build.
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 384Mi
+
+rbac:
+  create: true
+  includeLegacyExtensions: false

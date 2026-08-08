@@ -1,0 +1,269 @@
+image:
+  repository: k8s-defect-bot
+  tag: "0.3.0"
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Findings are held in memory, so more than one replica means inconsistent reads.
+replicaCount: 1
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+    # On EKS, attach an IRSA role here if you need one:
+    # eks.amazonaws.com/role-arn: arn:aws:iam::<account>:role/<role>
+
+rbac:
+  create: true
+  # Adds read access to the legacy extensions/v1beta1 ingress API, only useful
+  # on clusters older than 1.22 for the 'deprecated_apis' rule.
+  includeLegacyExtensions: true
+
+# ---------------------------------------------------------------------------
+# Who may use the bot -- and where their notifications go
+# ---------------------------------------------------------------------------
+# One registry serves both purposes: a person's entry is their login *and* their
+# mailing-list membership, so access and alerting can never drift apart.
+#
+# Generate credentials with:
+#   python -m app.auth new-user you@example.com --name "You" --role admin
+#   python -m app.auth hash-password
+#   python -m app.auth new-token
+auth:
+  enabled: true
+  # Leave `users` empty and the chart creates a single admin with a generated
+  # password, printed once by `helm install` and reused across upgrades.
+  # That keeps the secure path the default path.
+  users: []
+  #  - email: you@example.com
+  #    name: You
+  #    role: admin              # admin | viewer
+  #    password_hash: "scrypt$..."
+  #    api_token_hash: ""       # optional, for scripted API access
+  #    notify:
+  #      mode: immediate        # immediate | digest | off
+  #      min_severity: critical # critical | warning
+  #      muted_types: []
+  #      namespaces: []         # empty = all
+  #      include_resolved: true
+  #      include_node_findings: true
+
+  # Reference your own Secret instead (must contain a users.json key).
+  existingSecret: ""
+  # Email of the auto-generated admin, used only when `users` is empty.
+  defaultAdminEmail: admin@example.com
+  sessionTtlSeconds: 43200
+  sessionIdleTimeoutSeconds: 3600
+  # Set true when serving over HTTPS so the session cookie is never sent in clear.
+  sessionCookieSecure: false
+  loginMaxAttempts: 5
+  loginLockoutSeconds: 300
+
+# ---------------------------------------------------------------------------
+# Email notifications
+# ---------------------------------------------------------------------------
+notifications:
+  enabled: false
+  # Amazon SES: use the regional SMTP endpoint and SES SMTP credentials
+  # (which are NOT your AWS access keys), e.g. email-smtp.us-east-1.amazonaws.com
+  smtp:
+    host: ""
+    port: 587
+    starttls: true
+    ssl: false
+    username: ""
+    password: ""
+    # Reference your own Secret instead (keys: smtp-username, smtp-password).
+    existingSecret: ""
+  from: k8s-defect-bot@example.com
+  fromName: k8s-defect-bot
+  # Cluster-wide floor; a person's own preference can only be stricter.
+  minSeverity: critical
+  digestIntervalSeconds: 3600
+  # Per-recipient ceiling, so a flapping cluster cannot mailbomb anyone.
+  maxEmailsPerHour: 10
+  # Treat the first scan after a restart as the baseline and stay quiet, rather
+  # than re-announcing every pre-existing defect.
+  baselineFirstScan: true
+  maxDefectsPerEmail: 25
+
+config:
+  # Shown in the dashboard header and every email subject line.
+  clusterName: my-eks-cluster
+  # Absolute URL of the dashboard, for links in emails. Empty omits them.
+  dashboardUrl: ""
+  scanIntervalSeconds: 300
+  # Comma-separated. Empty scans every namespace.
+  namespaceFilter: ""
+  enabledRules:
+    - crashloopbackoff
+    - imagepullbackoff
+    - pending_pods
+    - oomkilled
+    - failing_probes
+    - high_restart_count
+    - node_pressure
+    - node_not_ready
+    - warning_events
+    - missing_resource_limits
+    - pvc_binding_failures
+    - service_port_mismatch
+    - deprecated_apis
+  logTailLines: 100
+  eventLookbackMinutes: 60
+  logLevel: INFO
+  # A node whose agent stops reporting for this long is shown as stale and its
+  # findings stop counting toward the totals.
+  nodeReportTtlSeconds: 900
+  clockSkewWarnSeconds: 60
+
+# ---------------------------------------------------------------------------
+# Node agent (DaemonSet) -- one pod per node, reporting node-local health
+# ---------------------------------------------------------------------------
+nodeAgent:
+  enabled: true
+  intervalSeconds: 120
+  enabledChecks:
+    - node_disk_usage
+    - node_inode_usage
+    - node_memory_available
+    - node_load_average
+    - node_pid_usage
+    - node_conntrack_usage
+    - node_kubelet_health
+    - node_container_runtime
+    - node_dns_resolution
+    - node_apiserver_reachable
+    # node_kernel_errors reads the kernel ring buffer and needs privileged: true
+    # below. Left out by default -- opt in deliberately.
+
+  # Shared bearer token for POST /api/agent/report. Leave both empty and the
+  # chart generates one and reuses it across upgrades.
+  #   token:          "<literal token>"
+  #   existingSecret: "<name of a Secret with a 'token' key>"
+  token: ""
+  existingSecret: ""
+
+  # Runs the agent as root with the kernel ring buffer readable. Only needed for
+  # the node_kernel_errors check; leave false otherwise.
+  privileged: false
+
+  # Monitoring is only useful if it also runs on the nodes people taint.
+  tolerateAll: true
+  tolerations: []
+  nodeSelector: {}
+  affinity: {}
+
+  thresholds:
+    diskWarnPercent: 80
+    diskCriticalPercent: 90
+    memoryWarnPercent: 85
+    loadPerCpuWarn: 2.0
+    pidWarnPercent: 80
+    conntrackWarnPercent: 80
+
+  kubeletHealthzUrl: "http://127.0.0.1:10248/healthz"
+  containerRuntimeSocket: "/run/containerd/containerd.sock"
+  dnsProbeHost: "kubernetes.default.svc.cluster.local"
+
+  resources:
+    requests:
+      cpu: 10m
+      memory: 48Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+# ---------------------------------------------------------------------------
+# Claude enrichment (optional)
+# ---------------------------------------------------------------------------
+llm:
+  # none          -- heuristics only. No credentials, no cost. (default)
+  # claude_cli    -- headless Claude Code. Works with a Claude Pro/Max
+  #                  SUBSCRIPTION. In-cluster it needs claudeCodeOauthToken
+  #                  (from `claude setup-token`) and an image that bundles the
+  #                  Claude Code CLI -- see usage.md. Running the collector on
+  #                  your own machine needs neither.
+  # anthropic_api -- Anthropic API key, billed per token, separate from a plan.
+  provider: none
+  # CLI aliases: opus | sonnet | haiku | fable, or a full model ID.
+  # Pro-plan users on a busy cluster may prefer "sonnet" or "haiku" for quota.
+  model: opus
+  maxDefectsPerScan: 5
+  timeoutSeconds: 120
+  # Provide credentials one of three ways:
+  #   claudeCodeOauthToken: "..."   -> chart creates a Secret (claude_cli)
+  #   apiKey: "sk-ant-..."          -> chart creates a Secret (anthropic_api)
+  #   existingSecret: "my-secret"   -> chart references yours, expecting keys
+  #                                    'claude-code-oauth-token' / 'anthropic-api-key'
+  claudeCodeOauthToken: ""
+  apiKey: ""
+  existingSecret: ""
+  # Mounts an emptyDir at /home/bot. The Claude Code CLI needs a writable HOME
+  # and the root filesystem is read-only, so set this true whenever
+  # provider=claude_cli runs in-cluster.
+  writableHome: false
+
+# ---------------------------------------------------------------------------
+# Network policy (optional, recommended in production)
+# ---------------------------------------------------------------------------
+networkPolicy:
+  enabled: false
+  # REQUIRED when enabled together with the node agents. The agents use
+  # hostNetwork, so they reach the collector from the NODE's address -- a
+  # podSelector does not match them and would lock every agent out.
+  # Find your node subnets with:
+  #   aws ec2 describe-subnets --subnet-ids $(aws eks describe-cluster \
+  #     --name <cluster> --query 'cluster.resourcesVpcConfig.subnetIds' \
+  #     --output text) --query 'Subnets[].CidrBlock' --output text
+  nodeCidrs: []
+  # Anything else that must reach the dashboard, e.g. your ingress controller.
+  allowFrom: []
+  #  - namespaceSelector:
+  #      matchLabels:
+  #        kubernetes.io/metadata.name: ingress-nginx
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # AWS Load Balancer Controller (EKS) example -- see usage.md:
+    # kubernetes.io/ingress.class: alb
+    # alb.ingress.kubernetes.io/scheme: internal
+    # alb.ingress.kubernetes.io/target-type: ip
+  host: k8s-defect-bot.local
+  path: /
+  pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+podAnnotations: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

@@ -1,0 +1,94 @@
+k8s-defect-bot {{ .Chart.AppVersion }} is installed as "{{ .Release.Name }}" in namespace {{ .Release.Namespace }}.
+
+Scan interval: {{ .Values.config.scanIntervalSeconds }}s
+Namespaces:    {{ .Values.config.namespaceFilter | default "all" }}
+Rules enabled: {{ len .Values.config.enabledRules }}
+Node agents:   {{ if .Values.nodeAgent.enabled }}on ({{ len .Values.nodeAgent.enabledChecks }} checks, every {{ .Values.nodeAgent.intervalSeconds }}s){{ else }}off{{ end }}
+Claude:        {{ .Values.llm.provider }}{{ if ne .Values.llm.provider "none" }} ({{ .Values.llm.model }}){{ end }}
+
+{{- if and .Values.auth.enabled (not .Values.auth.users) (not .Values.auth.existingSecret) }}
+
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │  A default administrator was generated because auth.users was empty.     │
+  └──────────────────────────────────────────────────────────────────────────┘
+
+  Email:    {{ .Values.auth.defaultAdminEmail }}
+  Password: kubectl -n {{ .Release.Namespace }} get secret {{ include "k8s-defect-bot.usersSecretName" . }} \
+              -o jsonpath='{.data.generated-password}' | base64 -d; echo
+
+  This password is stored in plaintext in that Secret so the chart can reuse it
+  across upgrades. Replace it with a real entry as soon as you can:
+
+    python -m app.auth new-user you@example.com --name "You" --role admin
+
+  then put the result in auth.users and `helm upgrade`.
+{{- else if not .Values.auth.enabled }}
+
+  WARNING: auth.enabled is false. Anyone who can reach this Service has full
+  access to the dashboard and API.
+{{- end }}
+
+Open the dashboard:
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "k8s-defect-bot.fullname" . }} 8080:{{ .Values.service.port }}
+  # then browse to http://localhost:8080
+
+{{- if .Values.ingress.enabled }}
+
+Or via ingress: http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.host }}{{ .Values.ingress.path }}
+{{- end }}
+
+Query the API directly:
+
+  curl http://localhost:8080/api/summary
+  curl http://localhost:8080/api/defects?severity=critical
+  curl http://localhost:8080/api/defects?source=node-agent
+  curl http://localhost:8080/api/nodes
+
+{{- if .Values.nodeAgent.enabled }}
+
+Node agents report every {{ .Values.nodeAgent.intervalSeconds }}s. Give them one
+interval, then check they are all in:
+
+  kubectl -n {{ .Release.Namespace }} get daemonset {{ include "k8s-defect-bot.agentName" . }}
+  kubectl -n {{ .Release.Namespace }} logs -l app.kubernetes.io/component=node-agent --tail=20
+
+A node missing from /api/nodes usually has a taint the DaemonSet doesn't tolerate.
+{{- if not .Values.nodeAgent.privileged }}
+
+The node_kernel_errors check (OOM kills, blocked tasks, I/O errors from the kernel
+ring buffer) is off. Enable with --set nodeAgent.privileged=true and add
+node_kernel_errors to nodeAgent.enabledChecks -- it runs the agent as root.
+{{- end }}
+{{- end }}
+
+{{- if .Values.notifications.enabled }}
+
+Email notifications go to everyone in the user registry whose notify.mode is not
+"off", via {{ .Values.notifications.smtp.host | default "(SMTP_HOST is not set!)" }}.
+Prove the path works by signing in as an admin and using "Send me a test email",
+or:
+
+  curl -X POST localhost:8080/api/notifications/test -H "Authorization: Bearer <api-token>"
+
+The first scan after a restart is a silent baseline, so expect no mail until
+something actually changes.
+{{- else }}
+
+Email notifications are off. Set notifications.enabled=true and
+notifications.smtp.host to turn them on -- see usage.md.
+{{- end }}
+
+{{- if eq .Values.llm.provider "none" }}
+
+Claude enrichment is off; every defect still gets a heuristic root cause and
+remediation. To add Claude analysis on top using your existing Claude Pro or Max
+subscription (no API key, no per-token billing), see usage.md -> "Claude analysis".
+{{- end }}
+
+{{- if gt (int .Values.replicaCount) 1 }}
+
+WARNING: replicaCount is {{ .Values.replicaCount }}. Findings are stored in memory per-pod,
+so requests will return inconsistent results depending on which replica answers.
+Set replicaCount to 1.
+{{- end }}

@@ -1,0 +1,26 @@
+{{- if .Values.nodeAgent.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "k8s-defect-bot.agentName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "k8s-defect-bot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: node-agent
+data:
+  COLLECTOR_URL: "http://{{ include "k8s-defect-bot.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}"
+  AGENT_INTERVAL_SECONDS: {{ .Values.nodeAgent.intervalSeconds | quote }}
+  ENABLED_NODE_CHECKS: {{ join "," .Values.nodeAgent.enabledChecks | quote }}
+  HOST_ROOT: "/host/root"
+  HOST_PROC: "/host/proc"
+  DISK_WARN_PERCENT: {{ .Values.nodeAgent.thresholds.diskWarnPercent | quote }}
+  DISK_CRITICAL_PERCENT: {{ .Values.nodeAgent.thresholds.diskCriticalPercent | quote }}
+  MEMORY_WARN_PERCENT: {{ .Values.nodeAgent.thresholds.memoryWarnPercent | quote }}
+  LOAD_PER_CPU_WARN: {{ .Values.nodeAgent.thresholds.loadPerCpuWarn | quote }}
+  PID_WARN_PERCENT: {{ .Values.nodeAgent.thresholds.pidWarnPercent | quote }}
+  CONNTRACK_WARN_PERCENT: {{ .Values.nodeAgent.thresholds.conntrackWarnPercent | quote }}
+  KUBELET_HEALTHZ_URL: {{ .Values.nodeAgent.kubeletHealthzUrl | quote }}
+  CONTAINER_RUNTIME_SOCKET: {{ .Values.nodeAgent.containerRuntimeSocket | quote }}
+  DNS_PROBE_HOST: {{ .Values.nodeAgent.dnsProbeHost | quote }}
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+{{- end }}

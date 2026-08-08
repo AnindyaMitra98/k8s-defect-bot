@@ -1,0 +1,133 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "k8s-defect-bot.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "k8s-defect-bot.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "k8s-defect-bot.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        # Roll the pod when settings change. The user registry is read once at
+        # startup, so a change to it needs a restart to take effect.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/users: {{ include (print $.Template.BasePath "/users-secret.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "k8s-defect-bot.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "k8s-defect-bot.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: bot
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: {{ include "k8s-defect-bot.fullname" . }}
+          {{- if or .Values.nodeAgent.enabled (ne .Values.llm.provider "none") .Values.notifications.enabled }}
+          env:
+            {{- if .Values.nodeAgent.enabled }}
+            # Shared secret the node agents present on POST /api/agent/report.
+            - name: AGENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "k8s-defect-bot.agentTokenSecretName" . }}
+                  key: token
+            {{- end }}
+            {{- if ne .Values.llm.provider "none" }}
+            - name: CLAUDE_CODE_OAUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "k8s-defect-bot.llmSecretName" . }}
+                  key: claude-code-oauth-token
+                  optional: true
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "k8s-defect-bot.llmSecretName" . }}
+                  key: anthropic-api-key
+                  optional: true
+            {{- end }}
+            {{- if .Values.notifications.enabled }}
+            - name: SMTP_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "k8s-defect-bot.smtpSecretName" . }}
+                  key: smtp-username
+                  optional: true
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "k8s-defect-bot.smtpSecretName" . }}
+                  key: smtp-password
+                  optional: true
+            {{- end }}
+          {{- end }}
+          volumeMounts:
+            - name: users
+              mountPath: /etc/k8s-defect-bot
+              readOnly: true
+            {{- if .Values.llm.writableHome }}
+            # The Claude Code CLI needs a writable HOME, and the root filesystem
+            # is read-only. Required for llm.provider=claude_cli in-cluster.
+            - name: claude-home
+              mountPath: /home/bot
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            # The first scan of a large cluster can take a while; don't flap.
+            failureThreshold: 12
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+      volumes:
+        # The user registry: who may sign in, and where their mail goes.
+        - name: users
+          secret:
+            secretName: {{ include "k8s-defect-bot.usersSecretName" . }}
+            optional: true
+        {{- if .Values.llm.writableHome }}
+        - name: claude-home
+          emptyDir: {}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

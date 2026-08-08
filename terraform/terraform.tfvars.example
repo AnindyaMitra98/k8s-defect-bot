@@ -1,0 +1,21 @@
+# Copy to terraform.tfvars and edit. Every value here has a working default --
+# an empty file is a valid configuration.
+
+# region      = "us-east-1"
+# name_prefix = "kdb-test"
+
+# Cheapest workable node. t4g.micro (1 GiB) is cheaper still but tight for the
+# image build; t3.small if you want x86.
+# instance_type  = "t4g.small"
+# use_spot       = true
+# root_volume_gb = 20
+
+# Leave unset to auto-detect your current public IP as a /32.
+# Set it explicitly if you are behind a changing address or a corporate NAT.
+# allowed_cidr = "203.0.113.42/32"
+
+# admin_email  = "you@example.com"
+# cluster_name = "kdb-test-k3s"
+
+# Set false for a bare k3s cluster, then follow usage.md by hand.
+# deploy_bot = true

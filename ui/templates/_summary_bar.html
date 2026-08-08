@@ -1,0 +1,51 @@
+{#
+  Rendered two ways:
+   - inlined into dashboard.html (no wrapper needed, the page supplies #summary-bar)
+   - returned standalone from /ui/summary, or out-of-band from /ui/scan when oob=True
+#}
+{# hx-swap-oob="innerHTML" so the wrapper's polling attributes on the page survive the swap. #}
+{% if oob %}<div id="summary-bar" hx-swap-oob="innerHTML">{% endif %}
+<div class="summary">
+  <div class="stat {{ 'stat-critical' if summary.critical_count else '' }}">
+    <span class="stat-value">{{ summary.critical_count }}</span>
+    <span class="stat-label">Critical</span>
+  </div>
+  <div class="stat {{ 'stat-warning' if summary.warning_count else '' }}">
+    <span class="stat-value">{{ summary.warning_count }}</span>
+    <span class="stat-label">Warning</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value">{{ summary.total_defects }}</span>
+    <span class="stat-label">Total defects</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value">{{ summary.pods_scanned }}</span>
+    <span class="stat-label">Pods scanned</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value">{{ summary.nodes_scanned }}</span>
+    <span class="stat-label">Nodes</span>
+  </div>
+  <div class="stat {{ 'stat-warning' if summary.agents_stale else '' }}">
+    <span class="stat-value">{{ summary.agents_reporting }}{% if summary.agents_stale %}<span class="stat-sub">/{{ summary.agents_stale }} stale</span>{% endif %}</span>
+    <span class="stat-label">Node agents</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value">{{ summary.namespaces_scanned }}</span>
+    <span class="stat-label">Namespaces</span>
+  </div>
+  <div class="stat stat-meta">
+    <span class="stat-value-sm">
+      {% if summary.last_scan_at %}
+        <time datetime="{{ summary.last_scan_at.isoformat() }}" data-relative>{{ summary.last_scan_at.strftime('%H:%M:%SZ') }}</time>
+      {% else %}
+        never
+      {% endif %}
+    </span>
+    <span class="stat-label">Last scan &middot; {{ summary.duration_seconds }}s</span>
+  </div>
+</div>
+{% if summary.error %}
+<div class="banner banner-error">Last scan reported an error: {{ summary.error }}</div>
+{% endif %}
+{% if oob %}</div>{% endif %}

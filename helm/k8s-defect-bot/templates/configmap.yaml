@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "k8s-defect-bot.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "k8s-defect-bot.labels" . | nindent 4 }}
+data:
+  SCAN_INTERVAL_SECONDS: {{ .Values.config.scanIntervalSeconds | quote }}
+  NAMESPACE_FILTER: {{ .Values.config.namespaceFilter | quote }}
+  ENABLED_RULES: {{ join "," .Values.config.enabledRules | quote }}
+  LOG_TAIL_LINES: {{ .Values.config.logTailLines | quote }}
+  EVENT_LOOKBACK_MINUTES: {{ .Values.config.eventLookbackMinutes | quote }}
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  PORT: "8080"
+  CLUSTER_NAME: {{ .Values.config.clusterName | quote }}
+  DASHBOARD_URL: {{ .Values.config.dashboardUrl | quote }}
+  NODE_REPORT_TTL_SECONDS: {{ .Values.config.nodeReportTtlSeconds | quote }}
+  CLOCK_SKEW_WARN_SECONDS: {{ .Values.config.clockSkewWarnSeconds | quote }}
+  AUTH_ENABLED: {{ .Values.auth.enabled | quote }}
+  AUTH_USERS_FILE: "/etc/k8s-defect-bot/users.json"
+  SESSION_TTL_SECONDS: {{ .Values.auth.sessionTtlSeconds | quote }}
+  SESSION_IDLE_TIMEOUT_SECONDS: {{ .Values.auth.sessionIdleTimeoutSeconds | quote }}
+  SESSION_COOKIE_SECURE: {{ .Values.auth.sessionCookieSecure | quote }}
+  LOGIN_MAX_ATTEMPTS: {{ .Values.auth.loginMaxAttempts | quote }}
+  LOGIN_LOCKOUT_SECONDS: {{ .Values.auth.loginLockoutSeconds | quote }}
+  NOTIFY_ENABLED: {{ .Values.notifications.enabled | quote }}
+  SMTP_HOST: {{ .Values.notifications.smtp.host | quote }}
+  SMTP_PORT: {{ .Values.notifications.smtp.port | quote }}
+  SMTP_STARTTLS: {{ .Values.notifications.smtp.starttls | quote }}
+  SMTP_SSL: {{ .Values.notifications.smtp.ssl | quote }}
+  SMTP_FROM: {{ .Values.notifications.from | quote }}
+  SMTP_FROM_NAME: {{ .Values.notifications.fromName | quote }}
+  NOTIFY_MIN_SEVERITY: {{ .Values.notifications.minSeverity | quote }}
+  NOTIFY_DIGEST_INTERVAL_SECONDS: {{ .Values.notifications.digestIntervalSeconds | quote }}
+  NOTIFY_MAX_EMAILS_PER_HOUR: {{ .Values.notifications.maxEmailsPerHour | quote }}
+  NOTIFY_BASELINE_FIRST_SCAN: {{ .Values.notifications.baselineFirstScan | quote }}
+  NOTIFY_MAX_DEFECTS_PER_EMAIL: {{ .Values.notifications.maxDefectsPerEmail | quote }}
+  LLM_PROVIDER: {{ .Values.llm.provider | quote }}
+  CLAUDE_MODEL: {{ .Values.llm.model | quote }}
+  LLM_MAX_DEFECTS_PER_SCAN: {{ .Values.llm.maxDefectsPerScan | quote }}
+  CLAUDE_TIMEOUT_SECONDS: {{ .Values.llm.timeoutSeconds | quote }}

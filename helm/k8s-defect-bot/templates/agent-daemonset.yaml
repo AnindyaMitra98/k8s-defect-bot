@@ -1,0 +1,129 @@
+{{- if .Values.nodeAgent.enabled }}
+{{- /*
+Node agent: one pod per node, reporting node-local health the control plane
+cannot see. It needs no Kubernetes API access -- it talks only to the collector
+Service -- so its ServiceAccount is deliberately permission-less and its token
+is not mounted.
+*/}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "k8s-defect-bot.agentName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "k8s-defect-bot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: node-agent
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "k8s-defect-bot.agentName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "k8s-defect-bot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: node-agent
+spec:
+  selector:
+    matchLabels:
+      {{- include "k8s-defect-bot.agentSelectorLabels" . | nindent 6 }}
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/agent-configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "k8s-defect-bot.agentSelectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "k8s-defect-bot.agentName" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Required to reach the kubelet healthz endpoint, which binds 127.0.0.1:10248.
+      hostNetwork: true
+      # With hostNetwork the pod would otherwise inherit the node's resolver and
+      # never exercise cluster DNS -- one of the things being checked.
+      dnsPolicy: ClusterFirstWithHostNet
+      priorityClassName: system-node-critical
+      {{- if .Values.nodeAgent.tolerateAll }}
+      tolerations:
+        - operator: Exists
+      {{- else if .Values.nodeAgent.tolerations }}
+      tolerations:
+        {{- toYaml .Values.nodeAgent.tolerations | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeAgent.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeAgent.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- if .Values.nodeAgent.privileged }}
+        runAsNonRoot: false
+        runAsUser: 0
+        {{- else }}
+        runAsNonRoot: true
+        runAsUser: 10001
+        {{- end }}
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "agent.node_agent"]
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: AGENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "k8s-defect-bot.agentTokenSecretName" . }}
+                  key: token
+          envFrom:
+            - configMapRef:
+                name: {{ include "k8s-defect-bot.agentName" . }}
+          resources:
+            {{- toYaml .Values.nodeAgent.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: {{ .Values.nodeAgent.privileged }}
+            readOnlyRootFilesystem: true
+            {{- if .Values.nodeAgent.privileged }}
+            capabilities:
+              drop: ["ALL"]
+              # Reading /dev/kmsg for the node_kernel_errors check.
+              add: ["SYSLOG"]
+            {{- else }}
+            capabilities:
+              drop: ["ALL"]
+            {{- end }}
+          volumeMounts:
+            - name: host-root
+              mountPath: /host/root
+              readOnly: true
+            - name: host-proc
+              mountPath: /host/proc
+              readOnly: true
+      volumes:
+        - name: host-root
+          hostPath:
+            path: /
+            type: Directory
+        - name: host-proc
+          hostPath:
+            path: /proc
+            type: Directory
+{{- end }}

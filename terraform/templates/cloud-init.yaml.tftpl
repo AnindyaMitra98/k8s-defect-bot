@@ -1,0 +1,50 @@
+#cloud-config
+# Brings the node to the point where a chart can be installed: k3s running,
+# Docker available to build the image, Helm on PATH. Everything the bot itself
+# needs is done later over SSH, so re-deploying the bot never rebuilds the node.
+package_update: true
+package_upgrade: false
+
+packages:
+  - unzip
+  - curl
+  - jq
+  - docker.io
+
+write_files:
+  - path: /opt/bootstrap.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euxo pipefail
+
+      systemctl enable --now docker
+      usermod -aG docker ubuntu
+
+      # The public IP is only knowable from inside the instance, and k3s needs it
+      # in the API server certificate for kubectl to work from anywhere else.
+      TOKEN=$(curl -sX PUT "http://169.254.169.254/latest/api/token" \
+        -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+      PUBLIC_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
+        http://169.254.169.254/latest/meta-data/public-ipv4)
+
+      curl -sfL https://get.k3s.io | \
+        INSTALL_K3S_VERSION="${k3s_version}" \
+        sh -s - server \
+          --write-kubeconfig-mode 644 \
+          --tls-san "$PUBLIC_IP" \
+          --node-name "${node_name}"
+
+      # k3s is "installed" well before it is usable.
+      for _ in $(seq 1 60); do
+        if k3s kubectl get nodes 2>/dev/null | grep -qw Ready; then break; fi
+        sleep 5
+      done
+
+      curl -sfL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      echo 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml' > /etc/profile.d/k3s.sh
+      touch /opt/bootstrap.done
+
+runcmd:
+  - [bash, /opt/bootstrap.sh]

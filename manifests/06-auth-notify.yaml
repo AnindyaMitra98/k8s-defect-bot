@@ -1,0 +1,58 @@
+# Authentication and email notification.
+#
+# The user registry is BOTH the access list and the mailing list: a person's
+# entry says whether they may sign in, what they may do, and where their
+# notifications go. Add someone by editing this Secret, remove them by editing
+# it back -- there is no signup, no self-service reset, and no database.
+#
+# Generate credentials with the bundled CLI (run it anywhere you have the repo):
+#
+#   python -m app.auth new-user  you@example.com --name "You" --role admin
+#   python -m app.auth hash-password
+#   python -m app.auth new-token                 # for scripted API access
+#
+# Then paste the generated entries into users.json below.
+#
+# WARNING: with this Secret absent, the collector runs with NO authentication and
+# says so loudly at startup. Anyone who can reach the Service gets full access.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: k8s-defect-bot-users
+  namespace: k8s-defect-bot
+  labels:
+    app.kubernetes.io/name: k8s-defect-bot
+type: Opaque
+stringData:
+  users.json: |
+    [
+      {
+        "email": "REPLACE-ME@example.com",
+        "name": "Cluster Admin",
+        "role": "admin",
+        "password_hash": "REPLACE-ME -- output of: python -m app.auth hash-password",
+        "notify": {
+          "mode": "immediate",
+          "min_severity": "critical",
+          "muted_types": [],
+          "namespaces": [],
+          "include_resolved": true,
+          "include_node_findings": true
+        }
+      }
+    ]
+---
+# SMTP credentials. For Amazon SES, create SMTP credentials in the SES console
+# (they are NOT your AWS access keys) and use the regional endpoint, e.g.
+# email-smtp.us-east-1.amazonaws.com:587.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: k8s-defect-bot-smtp
+  namespace: k8s-defect-bot
+  labels:
+    app.kubernetes.io/name: k8s-defect-bot
+type: Opaque
+stringData:
+  smtp-username: "REPLACE-ME"
+  smtp-password: "REPLACE-ME"

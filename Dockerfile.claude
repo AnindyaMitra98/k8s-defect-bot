@@ -1,0 +1,52 @@
+# Optional image variant: the base image plus the Claude Code CLI.
+#
+# Only needed for LLM_PROVIDER=claude_cli running IN-CLUSTER. Two other paths
+# need nothing from this file:
+#   * LLM_PROVIDER=none        -- the default; use the plain Dockerfile
+#   * running the collector on your own machine, where you are already logged in
+#
+# Build:
+#   docker build -f Dockerfile.claude -t k8s-defect-bot:0.3.0-claude .
+#
+# The container authenticates with CLAUDE_CODE_OAUTH_TOKEN, produced on your
+# machine by `claude setup-token` against your Claude subscription. See usage.md.
+FROM python:3.12-slim AS base
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+# Claude Code is distributed via npm, so Node is a build-and-run dependency here.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g @anthropic-ai/claude-code \
+    && apt-get purge -y gnupg && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY main.py ./
+COPY app/ ./app/
+COPY scraper/ ./scraper/
+COPY analyzer/ ./analyzer/
+COPY agent/ ./agent/
+COPY ui/ ./ui/
+
+# Claude Code writes config and session state under $HOME and $CLAUDE_CONFIG_DIR.
+# With readOnlyRootFilesystem the pod must mount an emptyDir at /home/bot --
+# see the deployment patch in usage.md.
+ENV HOME=/home/bot \
+    CLAUDE_CONFIG_DIR=/home/bot/.claude
+
+RUN useradd --uid 10001 --home-dir /home/bot --create-home --shell /usr/sbin/nologin bot \
+    && chown -R bot:bot /app /home/bot
+USER 10001
+
+EXPOSE 8080
+
+CMD ["python", "main.py"]

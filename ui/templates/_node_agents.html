@@ -1,0 +1,51 @@
+{#
+  Node-agent fleet panel. One row per node that has ever reported; rows go
+  stale (rather than disappearing) so a dead agent is visible instead of silent.
+#}
+<div class="panel-head">
+  <h2>Node agents</h2>
+  <span class="hint">{{ agents | length }} reporting &middot; stale after {{ ttl_seconds }}s</span>
+</div>
+
+{% if agents %}
+<table class="agents">
+  <thead>
+    <tr>
+      <th>Node</th>
+      <th class="col-num">Checks</th>
+      <th class="col-num">Findings</th>
+      <th class="col-num">Skew</th>
+      <th class="col-age">Last report</th>
+      <th class="col-sev">State</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for a in agents %}
+    <tr class="{{ 'agent-stale' if a.stale else '' }}">
+      <td class="name">{{ a.node }}</td>
+      <td class="col-num">{{ a.checks_run }}</td>
+      <td class="col-num">
+        {% if a.critical_count %}<span class="pill pill-critical">{{ a.critical_count }}</span>{% endif %}
+        {{ a.finding_count }}
+      </td>
+      <td class="col-num">{{ a.clock_skew_seconds }}s</td>
+      <td class="age">{{ a.age_seconds | round(0) | int }}s ago</td>
+      <td>
+        {% if a.stale %}
+          <span class="pill pill-critical">stale</span>
+        {% elif a.critical_count %}
+          <span class="pill pill-warning">degraded</span>
+        {% else %}
+          <span class="pill pill-ok">healthy</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty empty-sm">
+  <p>No node agents have reported yet.</p>
+  <p class="hint">Deploy the DaemonSet, then wait one agent interval. See usage.md.</p>
+</div>
+{% endif %}

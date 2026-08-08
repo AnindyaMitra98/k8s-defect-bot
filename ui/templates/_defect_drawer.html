@@ -1,0 +1,75 @@
+<div class="drawer-header">
+  <div>
+    <span class="pill pill-{{ defect.severity.value }}">{{ defect.severity.value }}</span>
+    <code class="type">{{ defect.type }}</code>
+    <span class="tag {{ 'tag-node' if defect.source.value == 'node-agent' else 'tag-cluster' }}">{{ defect.source.value }}</span>
+    {% if defect.llm_enriched %}<span class="pill pill-llm">claude</span>{% endif %}
+  </div>
+  <button class="btn btn-ghost" onclick="closeDrawer()" aria-label="Close">&times;</button>
+</div>
+
+<h2 class="drawer-title">
+  <span class="kind">{{ defect.kind }}</span>
+  {{ (defect.namespace ~ ' / ') if defect.namespace else '' }}{{ defect.name }}
+</h2>
+<p class="drawer-message">{{ defect.message }}</p>
+
+{% if defect.root_cause %}
+<section class="block">
+  <h3>Root cause</h3>
+  <p class="prose">{{ defect.root_cause }}</p>
+</section>
+{% endif %}
+
+{% if defect.remediation %}
+<section class="block">
+  <h3>Remediation</h3>
+  <ol class="steps">
+    {% for step in defect.remediation %}<li>{{ step }}</li>{% endfor %}
+  </ol>
+</section>
+{% endif %}
+
+{% if defect.commands %}
+<section class="block">
+  <h3>Commands</h3>
+  {% for cmd in defect.commands %}
+  <div class="cmd">
+    <code>{{ cmd }}</code>
+    <button class="btn btn-copy" onclick="copyText(this)" data-copy="{{ cmd }}">copy</button>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if defect.details %}
+<section class="block">
+  <h3>Details</h3>
+  <dl class="details">
+    {% for key, value in defect.details.items() %}
+    <dt>{{ key }}</dt><dd>{{ value if value is not none else '-' }}</dd>
+    {% endfor %}
+  </dl>
+</section>
+{% endif %}
+
+{% if defect.events %}
+<section class="block">
+  <h3>Events</h3>
+  <ul class="events">
+    {% for e in defect.events %}<li>{{ e }}</li>{% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if defect.logs %}
+<section class="block">
+  <h3>Log tail</h3>
+  <pre class="logs">{{ defect.logs }}</pre>
+</section>
+{% endif %}
+
+<p class="drawer-footer">
+  Detected <time datetime="{{ defect.detected_at.isoformat() }}">{{ defect.detected_at.strftime('%Y-%m-%d %H:%M:%SZ') }}</time>
+  &middot; id <code>{{ defect.id }}</code>
+</p>

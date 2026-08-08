@@ -1,0 +1,5 @@
+# Everything here is consumed by Linux: container images, k3s nodes, and a
+# cloud-init script rendered from templates/*.tftpl. A CRLF checkout on Windows
+# would give that script `#!/usr/bin/env bash\r`, which fails on the node with a
+# "bad interpreter" error that points nowhere useful. Normalise to LF.
+* text=auto eol=lf

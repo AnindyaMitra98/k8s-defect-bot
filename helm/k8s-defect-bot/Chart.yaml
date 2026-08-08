@@ -1,0 +1,13 @@
+apiVersion: v2
+name: k8s-defect-bot
+description: Scans a Kubernetes cluster for common defects and suggests remediations.
+type: application
+version: 0.3.0
+appVersion: "0.3.0"
+keywords:
+  - kubernetes
+  - troubleshooting
+  - sre
+  - observability
+sources:
+  - https://github.com/anind/K8S-Bot

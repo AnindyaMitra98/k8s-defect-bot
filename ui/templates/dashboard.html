@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>k8s-defect-bot</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#9784;</text></svg>">
+  <script src="/static/hx-lite.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">&#9784;</span>
+      <div>
+        <h1>k8s-defect-bot</h1>
+        <p class="brand-sub">{{ cluster_name }} &middot; defect detection &amp; remediation</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <span class="hint">auto-scan every {{ scan_interval_seconds }}s</span>
+      {% if llm_provider and llm_provider != 'none' %}
+      <span class="tag tag-llm">claude: {{ llm_provider }}</span>
+      {% endif %}
+      {% if not user or user.role.value == 'admin' %}
+      <button class="btn btn-primary"
+              hx-post="/ui/scan"
+              hx-target="#defect-panel"
+              hx-indicator="#scan-spinner">
+        <span id="scan-spinner" class="spinner"></span>
+        Scan now
+      </button>
+      {% endif %}
+      {% if user %}
+      <div class="user-chip" title="{{ user.email }}">
+        <span class="user-name">{{ user.display_name }}</span>
+        <span class="tag tag-role">{{ user.role.value }}</span>
+        <a class="btn btn-ghost btn-signout" href="/logout" title="Sign out">Sign out</a>
+      </div>
+      {% elif not auth_enabled %}
+      <span class="tag tag-warn" title="No users are configured, so the dashboard is open to anyone who can reach it">unauthenticated</span>
+      {% endif %}
+    </div>
+  </header>
+
+  <main>
+    <div id="summary-bar"
+         hx-get="/ui/summary"
+         hx-target="#summary-bar"
+         hx-swap="innerHTML"
+         hx-trigger="every {{ scan_interval_seconds }}s">
+      {% include "_summary_bar.html" %}
+    </div>
+
+    <section id="node-panel"
+             class="panel"
+             hx-get="/ui/nodes"
+             hx-target="#node-panel"
+             hx-swap="innerHTML"
+             hx-trigger="load, every 60s">
+      <div class="empty empty-sm">Loading node agents&hellip;</div>
+    </section>
+
+    <section id="notify-panel"
+             class="panel"
+             hx-get="/ui/notifications"
+             hx-target="#notify-panel"
+             hx-swap="innerHTML"
+             hx-trigger="load, every 120s">
+      <div class="empty empty-sm">Loading notifications&hellip;</div>
+    </section>
+
+    <section id="defect-panel"
+             hx-get="/ui/defects"
+             hx-target="#defect-panel"
+             hx-trigger="load">
+      <div class="empty">Loading defects&hellip;</div>
+    </section>
+  </main>
+
+  <div id="drawer-backdrop" class="drawer-backdrop" onclick="closeDrawer()"></div>
+  <aside id="drawer" class="drawer" aria-live="polite">
+    <div id="drawer-body"></div>
+  </aside>
+
+  <footer class="footer">
+    <span>JSON API: <code>/api/defects</code> &middot; <code>/api/summary</code> &middot; <code>/api/scan</code></span>
+    <span><code>/healthz</code> &middot; <code>/readyz</code></span>
+  </footer>
+</body>
+</html>

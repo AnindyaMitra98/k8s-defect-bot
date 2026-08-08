@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in &middot; k8s-defect-bot</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#9784;</text></svg>">
+</head>
+<body class="login-body">
+  <main class="login-card">
+    <div class="login-brand">
+      <span class="brand-mark">&#9784;</span>
+      <div>
+        <h1>k8s-defect-bot</h1>
+        <p class="brand-sub">{{ cluster_name }}</p>
+      </div>
+    </div>
+
+    {% if config_error %}
+    <div class="banner banner-error">
+      The user registry could not be loaded, so no one can sign in.
+      An administrator needs to fix it: {{ config_error }}
+    </div>
+    {% endif %}
+
+    {% if error %}
+    <div class="banner banner-error" role="alert">{{ error }}</div>
+    {% endif %}
+
+    <form method="post" action="/login" class="login-form">
+      <input type="hidden" name="next" value="{{ next }}">
+      <label>
+        <span>Email</span>
+        <input type="email" name="email" autocomplete="username" required autofocus
+               inputmode="email" placeholder="you@example.com">
+      </label>
+      <label>
+        <span>Password</span>
+        <input type="password" name="password" autocomplete="current-password" required>
+      </label>
+      <button type="submit" class="btn btn-primary btn-block">Sign in</button>
+    </form>
+
+    <p class="login-foot">
+      Accounts are managed by your cluster administrator. There is no self-service
+      sign-up or password reset.
+    </p>
+  </main>
+</body>
+</html>

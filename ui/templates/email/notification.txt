@@ -1,0 +1,75 @@
+{% if digest %}CLUSTER DIGEST{% else %}CLUSTER UPDATE{% endif %} - {{ cluster }}
+{{ '=' * 60 }}
+
+Hello {{ user.display_name }},
+{% if changes.scan_error %}
+
+SCAN PROBLEM
+------------
+{{ changes.scan_error }}
+{% endif %}
+{% if changes.scan_recovered %}
+
+SCAN RECOVERED
+--------------
+The cluster scan is completing normally again.
+{% endif %}
+{% if changes.new %}
+
+NEW ({{ changes.new | length }})
+----
+{% for d in changes.new[:max_listed] %}
+[{{ d.severity.value | upper }}] {{ d.type }}
+  {{ d.kind }} {{ (d.namespace ~ '/') if d.namespace else '' }}{{ d.name }}
+  {{ d.message }}
+{% if d.root_cause %}
+  Why: {{ d.root_cause.split('\n')[0] }}
+{% endif %}
+{% if d.remediation %}
+  Next: {{ d.remediation[0] }}
+{% endif %}
+{% if d.commands %}
+  Run: {{ d.commands[0] }}
+{% endif %}
+
+{% endfor %}
+{% if changes.new | length > max_listed %}
+  ... and {{ changes.new | length - max_listed }} more. See the dashboard.
+{% endif %}
+{% endif %}
+{% if changes.agents_lost %}
+
+NODE AGENTS OFFLINE ({{ changes.agents_lost | length }})
+-------------------
+{% for node in changes.agents_lost %}
+  - {{ node }} stopped reporting
+{% endfor %}
+{% endif %}
+{% if changes.agents_recovered %}
+
+NODE AGENTS RECOVERED ({{ changes.agents_recovered | length }})
+---------------------
+{% for node in changes.agents_recovered %}
+  - {{ node }} is reporting again
+{% endfor %}
+{% endif %}
+{% if changes.resolved %}
+
+RESOLVED ({{ changes.resolved | length }})
+--------
+{% for d in changes.resolved[:max_listed] %}
+  - [{{ d.severity.value }}] {{ d.type }} on {{ (d.namespace ~ '/') if d.namespace else '' }}{{ d.name }}
+{% endfor %}
+{% if changes.resolved | length > max_listed %}
+  ... and {{ changes.resolved | length - max_listed }} more.
+{% endif %}
+{% endif %}
+{% if dashboard_url %}
+
+Dashboard: {{ dashboard_url }}
+{% endif %}
+
+--
+k8s-defect-bot - {{ generated_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}
+You receive this because you are in the bot's user registry. To change what you
+are mailed about, or to stop entirely, ask an administrator to edit your entry.

@@ -1,0 +1,107 @@
+{# Inline styles only: mail clients strip <style> blocks and never load external CSS. #}
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#1f2328;max-width:680px;margin:0 auto;padding:16px;">
+
+  <div style="border-bottom:2px solid #d0d7de;padding-bottom:12px;margin-bottom:20px;">
+    <div style="font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:#656d76;">
+      {% if digest %}Cluster digest{% else %}Cluster update{% endif %}
+    </div>
+    <div style="font-size:20px;font-weight:600;margin-top:4px;">{{ cluster }}</div>
+  </div>
+
+  <p style="margin:0 0 20px;">Hello {{ user.display_name }},</p>
+
+  {% if changes.scan_error %}
+  <div style="background:#fff8c5;border:1px solid #d4a72c;border-radius:6px;padding:12px 14px;margin-bottom:20px;">
+    <strong style="color:#7d4e00;">Scan problem</strong>
+    <div style="margin-top:4px;color:#4d2d00;">{{ changes.scan_error }}</div>
+  </div>
+  {% endif %}
+
+  {% if changes.scan_recovered %}
+  <div style="background:#dafbe1;border:1px solid #2da44e;border-radius:6px;padding:12px 14px;margin-bottom:20px;">
+    <strong style="color:#1a7f37;">Scan recovered</strong>
+    <div style="margin-top:4px;color:#1a7f37;">The cluster scan is completing normally again.</div>
+  </div>
+  {% endif %}
+
+  {% if changes.new %}
+  <h2 style="font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:#656d76;margin:0 0 10px;">
+    New ({{ changes.new | length }})
+  </h2>
+  {% for d in changes.new[:max_listed] %}
+  <div style="border:1px solid #d0d7de;border-left:4px solid {{ '#cf222e' if d.severity.value == 'critical' else '#bf8700' }};border-radius:6px;padding:12px 14px;margin-bottom:12px;">
+    <div style="margin-bottom:6px;">
+      <span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;text-transform:uppercase;background:{{ '#ffebe9' if d.severity.value == 'critical' else '#fff8c5' }};color:{{ '#cf222e' if d.severity.value == 'critical' else '#7d4e00' }};">{{ d.severity.value }}</span>
+      <code style="font-size:12px;color:#0969da;margin-left:6px;">{{ d.type }}</code>
+      {% if d.source.value == 'node-agent' %}
+      <span style="display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase;background:#ddf4ff;color:#0969da;margin-left:4px;">node</span>
+      {% endif %}
+    </div>
+    <div style="font-weight:600;word-break:break-all;">
+      {{ d.kind }} &middot; {{ (d.namespace ~ '/') if d.namespace else '' }}{{ d.name }}
+    </div>
+    <div style="color:#424a53;margin-top:4px;">{{ d.message }}</div>
+    {% if d.root_cause %}
+    <div style="margin-top:10px;color:#424a53;"><strong style="color:#1f2328;">Why:</strong> {{ d.root_cause.split('\n')[0] }}</div>
+    {% endif %}
+    {% if d.remediation %}
+    <div style="margin-top:6px;color:#424a53;"><strong style="color:#1f2328;">Next:</strong> {{ d.remediation[0] }}</div>
+    {% endif %}
+    {% if d.commands %}
+    <div style="margin-top:10px;background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;padding:8px 10px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;word-break:break-all;">{{ d.commands[0] }}</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% if changes.new | length > max_listed %}
+  <p style="color:#656d76;margin:0 0 20px;">&hellip; and {{ changes.new | length - max_listed }} more. See the dashboard for the full list.</p>
+  {% endif %}
+  {% endif %}
+
+  {% if changes.agents_lost %}
+  <h2 style="font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:#656d76;margin:20px 0 10px;">
+    Node agents offline ({{ changes.agents_lost | length }})
+  </h2>
+  <ul style="margin:0 0 20px;padding-left:20px;color:#424a53;">
+    {% for node in changes.agents_lost %}
+    <li><code style="font-size:12px;">{{ node }}</code> stopped reporting</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if changes.agents_recovered %}
+  <h2 style="font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:#656d76;margin:20px 0 10px;">
+    Node agents recovered ({{ changes.agents_recovered | length }})
+  </h2>
+  <ul style="margin:0 0 20px;padding-left:20px;color:#424a53;">
+    {% for node in changes.agents_recovered %}
+    <li><code style="font-size:12px;">{{ node }}</code> is reporting again</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if changes.resolved %}
+  <h2 style="font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:#656d76;margin:20px 0 10px;">
+    Resolved ({{ changes.resolved | length }})
+  </h2>
+  <ul style="margin:0 0 20px;padding-left:20px;color:#424a53;">
+    {% for d in changes.resolved[:max_listed] %}
+    <li><code style="font-size:12px;">{{ d.type }}</code> on {{ (d.namespace ~ '/') if d.namespace else '' }}{{ d.name }}</li>
+    {% endfor %}
+    {% if changes.resolved | length > max_listed %}
+    <li>&hellip; and {{ changes.resolved | length - max_listed }} more.</li>
+    {% endif %}
+  </ul>
+  {% endif %}
+
+  {% if dashboard_url %}
+  <p style="margin:24px 0;">
+    <a href="{{ dashboard_url }}" style="display:inline-block;background:#1f6feb;color:#ffffff;text-decoration:none;padding:9px 18px;border-radius:6px;font-weight:600;">Open the dashboard</a>
+  </p>
+  {% endif %}
+
+  <div style="border-top:1px solid #d0d7de;margin-top:28px;padding-top:12px;font-size:12px;color:#656d76;">
+    k8s-defect-bot &middot; {{ generated_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}<br>
+    You receive this because you are in the bot's user registry. To change what you
+    are mailed about, or to stop entirely, ask an administrator to edit your entry.
+  </div>
+</div>

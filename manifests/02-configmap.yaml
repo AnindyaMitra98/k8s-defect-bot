@@ -1,0 +1,79 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k8s-defect-bot
+  namespace: k8s-defect-bot
+  labels:
+    app.kubernetes.io/name: k8s-defect-bot
+data:
+  SCAN_INTERVAL_SECONDS: "300"
+  # Comma-separated list; leave empty to scan every namespace.
+  NAMESPACE_FILTER: ""
+  ENABLED_RULES: "crashloopbackoff,imagepullbackoff,pending_pods,oomkilled,failing_probes,high_restart_count,node_pressure,node_not_ready,warning_events,missing_resource_limits,pvc_binding_failures,service_port_mismatch,deprecated_apis"
+  LOG_TAIL_LINES: "100"
+  EVENT_LOOKBACK_MINUTES: "60"
+  LOG_LEVEL: "INFO"
+  PORT: "8080"
+  # Shown in the dashboard header and every email subject line.
+  CLUSTER_NAME: "my-eks-cluster"
+  # Absolute URL of the dashboard, used for links in emails. Leave empty to omit them.
+  DASHBOARD_URL: ""
+  # A node whose agent hasn't reported within this window is shown as stale and
+  # its findings stop counting toward the totals.
+  NODE_REPORT_TTL_SECONDS: "900"
+  CLOCK_SKEW_WARN_SECONDS: "60"
+  # --- Authentication ---
+  # Enforced as soon as the users Secret has at least one entry. See 06-auth-notify.yaml.
+  AUTH_ENABLED: "true"
+  AUTH_USERS_FILE: "/etc/k8s-defect-bot/users.json"
+  SESSION_TTL_SECONDS: "43200"
+  SESSION_IDLE_TIMEOUT_SECONDS: "3600"
+  # Set to "true" when the dashboard is served over HTTPS.
+  SESSION_COOKIE_SECURE: "false"
+  LOGIN_MAX_ATTEMPTS: "5"
+  LOGIN_LOCKOUT_SECONDS: "300"
+  # --- Email notifications ---
+  NOTIFY_ENABLED: "false"
+  SMTP_HOST: ""
+  SMTP_PORT: "587"
+  SMTP_STARTTLS: "true"
+  SMTP_FROM: "k8s-defect-bot@example.com"
+  SMTP_FROM_NAME: "k8s-defect-bot"
+  # Cluster-wide floor; a person's own preference can only be stricter.
+  NOTIFY_MIN_SEVERITY: "critical"
+  NOTIFY_DIGEST_INTERVAL_SECONDS: "3600"
+  NOTIFY_MAX_EMAILS_PER_HOUR: "10"
+  NOTIFY_BASELINE_FIRST_SCAN: "true"
+  # LLM enrichment: none | claude_cli | anthropic_api.
+  # "claude_cli" works with a Claude Pro/Max subscription -- see usage.md for the
+  # in-cluster token setup. "none" needs no credentials at all.
+  LLM_PROVIDER: "none"
+  CLAUDE_MODEL: "opus"
+  LLM_MAX_DEFECTS_PER_SCAN: "5"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k8s-defect-bot-agent
+  namespace: k8s-defect-bot
+  labels:
+    app.kubernetes.io/name: k8s-defect-bot
+    app.kubernetes.io/component: node-agent
+data:
+  COLLECTOR_URL: "http://k8s-defect-bot"
+  AGENT_INTERVAL_SECONDS: "120"
+  # node_kernel_errors is omitted: it reads the kernel ring buffer and needs a
+  # privileged agent. Add it here *and* set privileged: true on the DaemonSet.
+  ENABLED_NODE_CHECKS: "node_disk_usage,node_inode_usage,node_memory_available,node_load_average,node_pid_usage,node_conntrack_usage,node_kubelet_health,node_container_runtime,node_dns_resolution,node_apiserver_reachable"
+  HOST_ROOT: "/host/root"
+  HOST_PROC: "/host/proc"
+  DISK_WARN_PERCENT: "80"
+  DISK_CRITICAL_PERCENT: "90"
+  MEMORY_WARN_PERCENT: "85"
+  LOAD_PER_CPU_WARN: "2.0"
+  PID_WARN_PERCENT: "80"
+  CONNTRACK_WARN_PERCENT: "80"
+  KUBELET_HEALTHZ_URL: "http://127.0.0.1:10248/healthz"
+  CONTAINER_RUNTIME_SOCKET: "/run/containerd/containerd.sock"
+  DNS_PROBE_HOST: "kubernetes.default.svc.cluster.local"
+  LOG_LEVEL: "INFO"

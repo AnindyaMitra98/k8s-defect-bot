@@ -1,0 +1,88 @@
+{#
+  Notification status panel. Shows where mail goes and whether the last sends
+  worked, so a silent SMTP failure is visible instead of invisible.
+#}
+<div class="panel-head">
+  <h2>Notifications</h2>
+  <span class="hint">
+    {% if status.enabled %}
+      via {{ status.smtp_host }} as {{ status['from'] }}
+    {% elif status.misconfiguration %}
+      <span class="pill pill-critical">misconfigured</span>
+    {% else %}
+      disabled
+    {% endif %}
+  </span>
+</div>
+
+{% if status.misconfiguration %}
+<div class="banner banner-error">{{ status.misconfiguration }}</div>
+{% endif %}
+
+{% if status.enabled %}
+<div class="notify-meta">
+  <span>Floor: <strong>{{ status.min_severity }}</strong></span>
+  <span>Cap: <strong>{{ status.max_emails_per_hour }}/hour</strong> per person</span>
+  <span>Tracking <strong>{{ status.tracked_defects }}</strong> defects</span>
+  {% if status.suppressed %}<span class="text-warn">{{ status.suppressed }} suppressed</span>{% endif %}
+  {% if not status.baselined %}<span class="text-warn">awaiting baseline scan</span>{% endif %}
+</div>
+
+{% if recipients %}
+<table class="agents">
+  <thead>
+    <tr>
+      <th>Recipient</th>
+      <th class="col-type">Mode</th>
+      <th class="col-sev">From</th>
+      <th>Scope</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in recipients %}
+    <tr>
+      <td class="name">{{ r.email }}</td>
+      <td><code class="type">{{ r.notify.mode }}</code></td>
+      <td><span class="pill pill-{{ r.notify.min_severity }}">{{ r.notify.min_severity }}</span></td>
+      <td class="message">
+        {% if r.notify.namespaces %}{{ r.notify.namespaces | join(', ') }}{% else %}all namespaces{% endif %}
+        {%- if not r.notify.include_node_findings %}, no node findings{% endif %}
+        {%- if r.notify.muted_types %}, muted: {{ r.notify.muted_types | join(', ') }}{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty empty-sm"><p>No one is set to receive notifications.</p></div>
+{% endif %}
+
+{% if status.recent %}
+<h3 class="subhead">Recent sends</h3>
+<ul class="events">
+  {% for d in status.recent %}
+  <li>
+    {% if d.ok %}<span class="pill pill-ok">sent</span>{% else %}<span class="pill pill-critical">failed</span>{% endif %}
+    {{ d.to }} &middot; {{ d.subject }}
+    {% if d.error %}<br><span class="text-warn">{{ d.error }}</span>{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% if is_admin %}
+<div class="notify-actions">
+  <button class="btn"
+          hx-post="/api/notifications/test"
+          hx-target="#notify-result"
+          hx-swap="innerHTML">Send me a test email</button>
+  <span id="notify-result" class="hint"></span>
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty empty-sm">
+  <p>Email notifications are off.</p>
+  <p class="hint">Set NOTIFY_ENABLED and SMTP_HOST to turn them on. See usage.md.</p>
+</div>
+{% endif %}

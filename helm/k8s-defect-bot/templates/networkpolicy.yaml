@@ -1,0 +1,42 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- /*
+Restricts who may reach the collector.
+
+The important subtlety: the node agents run with hostNetwork: true, so their
+traffic arrives from the NODE's address, not a pod address. A podSelector
+matching the DaemonSet therefore does NOT match them and would lock every agent
+out. Their access has to be granted by ipBlock over the node/VPC CIDRs, which is
+why networkPolicy.nodeCidrs is required.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "k8s-defect-bot.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "k8s-defect-bot.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "k8s-defect-bot.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: 8080
+          protocol: TCP
+      from:
+        {{- if .Values.nodeAgent.enabled }}
+        {{- if not .Values.networkPolicy.nodeCidrs }}
+        {{- fail "networkPolicy.enabled requires networkPolicy.nodeCidrs when nodeAgent.enabled is true -- the agents use hostNetwork, so they reach the collector from the node's address. Set it to your node subnet CIDRs." }}
+        {{- end }}
+        {{- range .Values.networkPolicy.nodeCidrs }}
+        # Node agents (hostNetwork -- they arrive from the node address).
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+        {{- end }}
+        {{- with .Values.networkPolicy.allowFrom }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}

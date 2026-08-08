@@ -1,0 +1,239 @@
+# Production values for k8s-defect-bot on EKS.
+#
+# Copy this file, replace every REPLACE-ME, and install with:
+#
+#   helm upgrade --install k8s-defect-bot ./helm/k8s-defect-bot \
+#     --namespace k8s-defect-bot --create-namespace \
+#     -f my-production-values.yaml
+#
+# Use "k8s-defect-bot" as the release name. The chart names resources after the
+# release unless the release name already contains the chart name -- so this one
+# gives you a Deployment called exactly "k8s-defect-bot" rather than
+# "<release>-k8s-defect-bot", which is what usage.md's commands assume.
+#
+# Anything not listed here keeps its default from values.yaml. Every setting
+# below is one you should consciously choose for a production cluster.
+#
+# NOTE ON SECRETS: this file holds no passwords. Credentials come from Secrets
+# you create separately (see usage.md step 3), which keeps them out of git and
+# out of shell history.
+
+# ---------------------------------------------------------------------------
+# Image -- your ECR repository, pinned to an immutable tag
+# ---------------------------------------------------------------------------
+image:
+  repository: REPLACE-ME.dkr.ecr.REPLACE-REGION.amazonaws.com/k8s-defect-bot
+  tag: "0.3.0"
+  # Always pull the pinned tag rather than trusting a cached layer.
+  pullPolicy: IfNotPresent
+
+# ---------------------------------------------------------------------------
+# Identity of this deployment
+# ---------------------------------------------------------------------------
+config:
+  # Appears in the dashboard header and EVERY email subject. Make it
+  # unambiguous -- this is what tells you which cluster paged you.
+  clusterName: REPLACE-ME-prod-eks
+  # Where people actually reach the dashboard. Turns notification emails from
+  # informational into actionable.
+  dashboardUrl: https://REPLACE-ME.internal.example.com
+
+  scanIntervalSeconds: 300
+  # Empty scans every namespace. Narrow this if the cluster is large or if some
+  # namespaces belong to teams who should not appear in your alerts.
+  namespaceFilter: ""
+  logLevel: INFO
+
+  # A node whose agent goes quiet for this long is shown as stale and its
+  # findings stop counting. Keep it at several times the agent interval.
+  nodeReportTtlSeconds: 900
+  clockSkewWarnSeconds: 60
+
+  # 'missing_resource_limits' is the noisiest rule on a cluster that has not
+  # adopted limits yet -- it fires on most of kube-system. Drop it from this
+  # list rather than letting people learn to ignore the dashboard.
+  enabledRules:
+    - crashloopbackoff
+    - imagepullbackoff
+    - pending_pods
+    - oomkilled
+    - failing_probes
+    - high_restart_count
+    - node_pressure
+    - node_not_ready
+    - warning_events
+    - missing_resource_limits
+    - pvc_binding_failures
+    - service_port_mismatch
+    - deprecated_apis
+
+# ---------------------------------------------------------------------------
+# Who may sign in, and who gets the mail
+# ---------------------------------------------------------------------------
+auth:
+  enabled: true
+  # Point at the Secret you created in step 3. Leaving `users` empty here means
+  # no credentials ever touch this file or your shell history.
+  existingSecret: k8s-defect-bot-users
+  # The dashboard is served over HTTPS in production, so the session cookie
+  # must never be sent in the clear.
+  sessionCookieSecure: true
+  sessionTtlSeconds: 43200          # 12h
+  sessionIdleTimeoutSeconds: 3600   # 1h
+  loginMaxAttempts: 5
+  loginLockoutSeconds: 300
+
+# ---------------------------------------------------------------------------
+# Email notifications
+# ---------------------------------------------------------------------------
+notifications:
+  enabled: true
+  smtp:
+    # Amazon SES regional endpoint. Credentials come from the Secret below --
+    # SES SMTP credentials, NOT your AWS access keys.
+    host: email-smtp.REPLACE-REGION.amazonaws.com
+    port: 587
+    starttls: true
+    existingSecret: k8s-defect-bot-smtp
+  # Must be a verified identity in SES.
+  from: k8s-defect-bot@REPLACE-ME.example.com
+  fromName: k8s-defect-bot
+
+  # Cluster-wide floor. Start at critical: people can opt themselves down to
+  # warning individually, but nobody can be looser than this.
+  minSeverity: critical
+  # Backstop against a flapping cluster mailbombing anyone.
+  maxEmailsPerHour: 10
+  digestIntervalSeconds: 3600
+  # Stay quiet on the first scan after a restart instead of re-announcing every
+  # pre-existing defect. Leave this on.
+  baselineFirstScan: true
+  maxDefectsPerEmail: 25
+
+# ---------------------------------------------------------------------------
+# Node agents
+# ---------------------------------------------------------------------------
+nodeAgent:
+  enabled: true
+  intervalSeconds: 120
+  # Monitoring is only useful if it also runs on the nodes people taint.
+  tolerateAll: true
+  # The token is generated and reused across upgrades unless you set one.
+  enabledChecks:
+    - node_disk_usage
+    - node_inode_usage
+    - node_memory_available
+    - node_load_average
+    - node_pid_usage
+    - node_conntrack_usage
+    - node_kubelet_health
+    - node_container_runtime
+    - node_dns_resolution
+    - node_apiserver_reachable
+    # node_kernel_errors needs privileged: true below -- opt in deliberately.
+  privileged: false
+  thresholds:
+    diskWarnPercent: 80
+    diskCriticalPercent: 90
+    memoryWarnPercent: 85
+    loadPerCpuWarn: 2.0
+    pidWarnPercent: 80
+    conntrackWarnPercent: 80
+  resources:
+    requests:
+      cpu: 10m
+      memory: 48Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+# ---------------------------------------------------------------------------
+# Claude analysis -- off by default; see usage.md before enabling in-cluster
+# ---------------------------------------------------------------------------
+llm:
+  provider: none
+  # model: sonnet
+  # existingSecret: k8s-defect-bot-llm
+  # writableHome: true        # required for provider=claude_cli in-cluster
+
+# ---------------------------------------------------------------------------
+# Exposure
+# ---------------------------------------------------------------------------
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  className: alb
+  host: REPLACE-ME.internal.example.com
+  path: /
+  pathType: Prefix
+  annotations:
+    # INTERNAL. This dashboard shows pod names, images, events, and container
+    # log tails -- it does not belong on the public internet.
+    alb.ingress.kubernetes.io/scheme: internal
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:REPLACE-REGION:REPLACE-ACCOUNT:certificate/REPLACE-ME
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    # Optional second gate: make the load balancer authenticate before traffic
+    # ever reaches the pod. The bot's own login still applies behind it.
+    # alb.ingress.kubernetes.io/auth-type: oidc
+
+# ---------------------------------------------------------------------------
+# Restrict who can reach the collector
+# ---------------------------------------------------------------------------
+networkPolicy:
+  enabled: true
+  # REQUIRED: the node agents use hostNetwork, so they arrive from the node's
+  # address. Without these CIDRs the policy locks every agent out. See usage.md.
+  nodeCidrs:
+    - REPLACE-ME/16      # e.g. 10.0.0.0/16 -- your node subnet CIDRs
+  allowFrom:
+    # Your ingress controller's namespace, so the ALB target can reach the pod.
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+# Sized for a few hundred pods. On a cluster with thousands, watch memory during
+# the first few scans and raise the limit -- a whole snapshot is held at once.
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+# Findings and sessions live in memory, so this MUST stay 1. See usage.md.
+replicaCount: 1
+
+serviceAccount:
+  create: true
+  annotations: {}
+
+rbac:
+  create: true
+  # Only useful on clusters older than 1.22. Harmless but pointless otherwise.
+  includeLegacyExtensions: false
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# Keep the collector off nodes you would rather not have it on, if any.
+nodeSelector: {}
+tolerations: []
+affinity: {}
