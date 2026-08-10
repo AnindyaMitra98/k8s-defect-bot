@@ -14,6 +14,7 @@ Nothing is billed once you destroy it, and there is no auto-shutdown, so
 ## Contents
 
 - [Before you start](#before-you-start)
+- [If it's already running](#if-its-already-running)
 - [Part 1 — Create the cluster](#part-1--create-the-cluster)
 - [Part 2 — Get into the node](#part-2--get-into-the-node)
 - [Part 3 — Install the bot](#part-3--install-the-bot)
@@ -48,6 +49,40 @@ dashboard — reachable from your IP address only.
 
 ---
 
+## If it's already running
+
+Coming back to an environment you built earlier, or picking up after an apply you
+lost track of? Everything you need is in the state file — you don't have to
+remember any of it, and you should not rebuild to find out.
+
+```bash
+cd terraform
+terraform output public_ip               # where the node is
+terraform output -raw install_commands   # the whole runbook, your IP filled in
+terraform output -raw kubeconfig_command
+```
+
+Then pick up at [Part 2](#part-2--get-into-the-node).
+
+**If nothing responds, check for IP drift first.** The security group allows a
+single `/32`, captured when you last applied, and a laptop that changed networks
+no longer matches it. This is the most common cause of "it worked yesterday":
+
+```powershell
+terraform output allowed_cidr                      # what the security group allows
+(Invoke-RestMethod https://checkip.amazonaws.com).Trim()   # where you are now
+```
+
+Different? `terraform apply` again — the CIDR is re-detected on every plan, and
+updating the rule doesn't touch the instance.
+
+> An apply that appears stuck may simply be running: while it holds
+> `.terraform.tfstate.lock.info`, `terraform.tfstate` can sit at zero bytes and
+> look empty. Let it finish before concluding the lock is stale — force-unlocking
+> a live apply is how you end up with resources the state file doesn't know about.
+
+---
+
 ## Part 1 — Create the cluster
 
 Terraform builds the infrastructure and installs k3s. It does **not** install the
@@ -66,6 +101,11 @@ Read the plan before applying. Two things to check:
   yourself in `terraform.tfvars` (copy `terraform.tfvars.example`).
 - `Plan: 14 to add`. No NAT gateway, no load balancer, no EIP — those are the
   things that would make this expensive.
+- `repo_branch` is the branch cloud-init clones onto the node, and it defaults to
+  **`main`** — not the branch you happen to have checked out. If the test
+  environment is being developed on a feature branch, the node gets `main`'s
+  version of `terraform/`, which can be missing files this walkthrough tells you
+  to use. [Part 3a](#3a-copy-the-values-file-up) covers the one that matters.
 
 ```bash
 terraform apply
@@ -79,18 +119,42 @@ cloud-init: installing k3s, Docker, Helm, and cloning the source. Go and read
 
 ## Part 2 — Get into the node
 
-### Windows: fix the key permission first
+### Windows: fix the key ACL — do this before your first ssh
 
-Terraform wrote the private key to `terraform/.ssh/kdb-test.pem`. It asked for
-mode `0600`, but **that's a no-op on NTFS** — OpenSSH will refuse the key with
-`UNPROTECTED PRIVATE KEY FILE` until you fix the Windows ACL. Once, in PowerShell:
+This is not a warning you can defer. **SSH will not work until you do it.**
 
-```powershell
-icacls .\.ssh\kdb-test.pem /inheritance:r /grant:r "$env:USERNAME:R"
+Terraform wrote the private key to `terraform/.ssh/kdb-test.pem` and asked for
+mode `0600`, but **that's a no-op on NTFS** — the file keeps its inherited ACL,
+which grants `Authenticated Users`, and OpenSSH refuses to use a key anyone can
+read:
+
+```
+Bad permissions. Try removing permissions for user: NT AUTHORITY\Authenticated Users (S-1-5-11)
+WARNING: UNPROTECTED PRIVATE KEY FILE!
+Permissions for './.ssh/kdb-test.pem' are too open.
+ubuntu@<ip>: Permission denied (publickey).
 ```
 
-`terraform output fix_key_permissions` prints that command with the right path
-already filled in.
+Once, in PowerShell, from the `terraform/` directory:
+
+```powershell
+icacls .\.ssh\kdb-test.pem /inheritance:r /grant:r "${env:USERNAME}:R"
+```
+
+`/inheritance:r` drops the inherited ACEs; `/grant:r` then re-grants read to just
+you. Confirm it took — you want exactly one line, your account, `(R)`:
+
+```powershell
+icacls .\.ssh\kdb-test.pem
+# E:\...\kdb-test.pem DESKTOP-XXXX\you:(R)
+```
+
+> **Keep the braces.** `"$env:USERNAME:R"` looks equivalent and is not:
+> PowerShell parses `USERNAME:R` as the variable name inside the `env:` drive,
+> finds nothing, and passes `icacls` an empty principal. The command reports
+> success, grants nobody, and ssh fails with the identical error — which is a
+> genuinely confusing half hour. `terraform output fix_key_permissions` prints
+> the braced form with your path already filled in.
 
 ### macOS / Linux
 
@@ -121,9 +185,12 @@ kubectl get nodes
 You want one node, `Ready`:
 
 ```
-NAME       STATUS   ROLES                  AGE   VERSION
-kdb-test   Ready    control-plane,master   3m    v1.33.x+k3s1
+NAME       STATUS   ROLES           AGE   VERSION
+kdb-test   Ready    control-plane   3m    v1.36.3+k3s1
 ```
+
+The version tracks whatever the k3s stable channel is serving unless you pin
+`k3s_version`, so expect it to differ from the line above.
 
 `kubectl` works without any setup here — cloud-init put `KUBECONFIG` in
 `/etc/profile.d/k3s.sh` for every login shell.
@@ -138,45 +205,110 @@ missing, read the cloud-init log; that's where the real error is.
 Terraform deliberately doesn't do this. Running it yourself is how you find out
 whether the deployment procedure still works.
 
+**You need two terminals**, and mixing them up is the usual way this goes wrong:
+
+| Terminal | Where | Steps |
+|---|---|---|
+| **A — workstation** | `terraform/` on your own machine | 3a only |
+| **B — node** | your SSH session from [Part 2](#part-2--get-into-the-node) | 3b – 3f |
+
+Every step below is labelled. Leave both open; you'll come back to A in
+[Part 5](#part-5--kubectl-from-your-own-machine).
+
+Grab your IP once, in terminal A, and keep it in front of you:
+
+```powershell
+terraform output public_ip
+```
+
+Budget about **five minutes**, nearly all of it the image build in 3b.
+
 ### 3a. Copy the values file up
 
-`values-test.yaml` lives in the `terraform/` directory on your machine. From a
-**second terminal on your workstation** (leave the SSH session open):
+**Terminal A (workstation), from the `terraform/` directory.**
+
+`values-test.yaml` lives here, next to the `.tf` files. Send it to the node:
+
+```powershell
+scp -i .\.ssh\kdb-test.pem values-test.yaml ubuntu@<public-ip>:~/
+```
+
+bash / zsh is the same command with forward slashes:
 
 ```bash
 scp -i .ssh/kdb-test.pem values-test.yaml ubuntu@<public-ip>:~/
 ```
+
+You want `values-test.yaml   100%  3143` and no other output. If this is the
+first `scp` rather than `ssh` you've run, and it fails on the key, you skipped
+the [ACL fix](#windows-fix-the-key-acl--do-this-before-your-first-ssh) —
+`scp` uses the same key and refuses it for the same reason.
 
 That file carries the handful of settings that are wrong-by-default on k3s — see
 [README.md](README.md#notable-settings-in-values-testyaml) for what each one
 prevents. Installing without it mostly works and then reports a critical defect
 on every node that isn't real.
 
-### 3b. Build the image, on the node
-
-Back in the SSH session:
+**Copy it from your workstation, not from the node's clone.** The node has a copy
+of the repo, so reaching for `~/k8s-defect-bot/terraform/values-test.yaml` is the
+obvious move — but cloud-init cloned `repo_branch` (default `main`), and if this
+file was added on a branch that hasn't been merged yet, it simply isn't there:
 
 ```bash
+ls ~/k8s-defect-bot/terraform/values-test.yaml   # on the node
+# No such file or directory  ->  stale clone; scp it up, as above
+```
+
+That's a clone that predates the file, not a broken bootstrap — `scp` and carry
+on. The bot's own source (`app/`, `scraper/`, `helm/`) is unaffected, so the
+build and install in the next steps are still valid.
+
+### 3b. Build the image, on the node
+
+**Terminal B (node).** Confirm the values file landed, then build:
+
+```bash
+ls -l ~/values-test.yaml                    # from 3a; must be here before 3d
+
 cd ~/k8s-defect-bot
 git pull                                    # cloud-init cloned it at boot
 sudo docker build -t k8s-defect-bot:0.3.0 .
 ```
 
-Takes about two minutes on a t4g.small. It produces an **arm64** image, which is
-correct — it never leaves this node.
+Takes about two minutes on a t4g.small, and prints a wall of build output. The
+line that matters is the last one:
+
+```
+Successfully tagged k8s-defect-bot:0.3.0
+```
+
+It produces an **arm64** image, which is correct — it never leaves this node.
 
 > The node builds **what is pushed to the branch**, not your local working tree.
-> If you're testing a change, push it first.
+> If you're testing a change, push it first. `git pull` here is a shallow clone
+> (`--depth 1`), so it fast-forwards the branch cloud-init cloned and nothing
+> else — it will not move you to a different branch.
+
+If the build is killed partway with no error of its own, you're out of memory;
+see [Troubleshooting](#troubleshooting).
 
 ### 3c. Import the image into k3s
 
-k3s doesn't use Docker's image store, so the image has to be handed to its
-containerd. No registry is involved:
+**Terminal B (node).** k3s doesn't use Docker's image store, so the image has to
+be handed to its containerd. No registry is involved:
 
 ```bash
 sudo docker save k8s-defect-bot:0.3.0 -o /tmp/kdb.tar
 sudo k3s ctr images import /tmp/kdb.tar
 sudo rm -f /tmp/kdb.tar
+```
+
+The import prints an `unpacking ... done` line. Verify it's really there before
+moving on — if it isn't, 3d fails with `ImagePullBackOff` and no way to recover,
+because there's no registry to fall back to:
+
+```bash
+sudo k3s ctr images ls | grep k8s-defect-bot
 ```
 
 > That last `sudo` matters. `docker save` ran as root, so the tar belongs to
@@ -186,8 +318,13 @@ sudo rm -f /tmp/kdb.tar
 
 ### 3d. Install the chart
 
+**Terminal B (node), from `~/k8s-defect-bot`** — the chart path is relative, so
+`cd` back if you've wandered:
+
 ```bash
+cd ~/k8s-defect-bot
 IP=$(curl -s ifconfig.me)          # or just type your public IP
+echo "$IP"                         # sanity-check it before it goes into a URL
 
 helm upgrade --install k8s-defect-bot ./helm/k8s-defect-bot \
   --namespace k8s-defect-bot --create-namespace \
@@ -197,9 +334,22 @@ helm upgrade --install k8s-defect-bot ./helm/k8s-defect-bot \
   --wait --timeout 10m
 ```
 
-`--wait` blocks until the pods are actually ready, so when this returns, it worked.
+All four of those arguments earn their place:
+
+| Argument | Without it |
+|---|---|
+| `-f ~/values-test.yaml` | a false `node_container_runtime` critical, and a login loop |
+| `--set ingress.host` | the ingress answers only for `k8s-defect-bot.local` |
+| `--set config.dashboardUrl` | notification links point at the wrong host |
+| `--wait` | returns before the pods are ready, so a failure looks like a success |
+
+`--wait` blocks until the pods are actually ready, so when this returns with
+`STATUS: deployed`, it worked. Two minutes is normal; the timeout is generous
+because a slow first start is not a failure.
 
 ### 3e. Check it came up
+
+**Terminal B (node).**
 
 ```bash
 kubectl -n k8s-defect-bot get pods
@@ -217,14 +367,33 @@ Read the collector's startup lines rather than grepping for errors — they tell
 you what it actually decided to do:
 
 ```bash
-kubectl -n k8s-defect-bot logs deploy/k8s-defect-bot | head -30
+kubectl -n k8s-defect-bot logs -l app.kubernetes.io/component=collector --tail=30
 ```
+
+> Select by component, not `deploy/k8s-defect-bot`. Both workloads share the
+> `name` and `instance` labels, so addressing the Deployment resolves to whichever
+> of the two pods kubectl picks first — and it is quite happy to hand you the
+> agent's logs while you read them as the collector's.
+
+Then confirm `values-test.yaml` actually took effect. This is the one check worth
+doing every time, because the failure is silent — the install succeeds and the
+dashboard simply lies to you about a broken node:
+
+```bash
+kubectl -n k8s-defect-bot get configmap k8s-defect-bot-agent \
+  -o jsonpath='{.data.CONTAINER_RUNTIME_SOCKET}{"\n"}'
+```
+
+You want a **k3s** path (`/run/k3s/containerd/containerd.sock`). A kubeadm path,
+or nothing at all, means the values file didn't apply — you missed `-f
+~/values-test.yaml` in 3d, or scp'd it somewhere other than `~`. Re-run 3d; it's
+idempotent.
 
 ### 3f. Get the sign-in password
 
-`values-test.yaml` leaves `auth.users` empty on purpose, so the chart generated an
-admin and stored the password in a Secret — better than putting one on a command
-line where it lands in your shell history.
+**Terminal B (node).** `values-test.yaml` leaves `auth.users` empty on purpose, so
+the chart generated an admin and stored the password in a Secret — better than
+putting one on a command line where it lands in your shell history.
 
 ```bash
 echo "Email:    admin@example.com"
@@ -656,6 +825,17 @@ you enabled `networkPolicy`, that's why: the agent uses `hostNetwork`, so it
 arrives from the node's address and a pod selector won't match it.
 `values-test.yaml` leaves NetworkPolicy off — k3s ships Flannel, which enforces
 none of it anyway.
+
+**`helm upgrade` fails with `field is immutable` on the Deployment selector.**
+You're upgrading across the change that added `app.kubernetes.io/component:
+collector` to the collector's selector. A Deployment's `spec.selector` cannot be
+edited in place, so the old object has to go first. Nothing is lost — the
+collector holds its state in memory and rebuilds it on the next scan:
+
+```bash
+kubectl -n k8s-defect-bot delete deployment k8s-defect-bot
+helm upgrade --install k8s-defect-bot ./helm/k8s-defect-bot ...   # as in 3d
+```
 
 **An empty dashboard with a scan-error banner.**
 That banner is deliberate. When API calls fail, the bot says so rather than
