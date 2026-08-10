@@ -1,6 +1,7 @@
 # A minimal public VPC. Deliberately no NAT gateway: at ~$32/month it would cost
-# several times the instance it serves. The node sits in a public subnet with a
-# public IP and reaches the internet through the internet gateway, which is free.
+# three times everything else here combined. The node sits in a public subnet
+# with a public IP and reaches the internet through the internet gateway, which
+# is free.
 
 data "aws_availability_zones" "available" {
   state = "available"
@@ -74,7 +75,7 @@ resource "aws_security_group" "node" {
 
 resource "aws_vpc_security_group_ingress_rule" "ssh" {
   security_group_id = aws_security_group.node.id
-  description       = "SSH, for the image build and chart install"
+  description       = "SSH -- this is how you install the bot and drive the node"
   cidr_ipv4         = local.allowed_cidr
   from_port         = 22
   to_port           = 22
@@ -103,7 +104,7 @@ resource "aws_vpc_security_group_ingress_rule" "kubernetes_api" {
 
 resource "aws_vpc_security_group_egress_rule" "all" {
   security_group_id = aws_security_group.node.id
-  description       = "Package installs, k3s and Helm downloads, container image pulls"
+  description       = "Package installs, k3s and Helm downloads, git clone, container image pulls"
   cidr_ipv4         = "0.0.0.0/0"
   ip_protocol       = "-1"
 }

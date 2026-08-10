@@ -4,8 +4,8 @@
 # region      = "us-east-1"
 # name_prefix = "kdb-test"
 
-# Cheapest workable node. t4g.micro (1 GiB) is cheaper still but tight for the
-# image build; t3.small if you want x86.
+# Cheapest workable node. t4g.micro (1 GiB) runs k3s but OOMs during the image
+# build; t3.small if you want x86.
 # instance_type  = "t4g.small"
 # use_spot       = true
 # root_volume_gb = 20
@@ -14,8 +14,16 @@
 # Set it explicitly if you are behind a changing address or a corporate NAT.
 # allowed_cidr = "203.0.113.42/32"
 
-# admin_email  = "you@example.com"
-# cluster_name = "kdb-test-k3s"
+# Open 6443 so kubectl works from your workstation.
+# expose_kubernetes_api = true
 
-# Set false for a bare k3s cluster, then follow usage.md by hand.
-# deploy_bot = true
+# Pin k3s if you are reproducing a version-specific problem.
+# k3s_version = "v1.30.6+k3s1"
+
+# The node clones this and builds it by hand. Point it at your fork or a branch
+# to test something that is not on main yet.
+# repo_url    = "https://github.com/AnindyaMitra98/k8s-defect-bot.git"
+# repo_branch = "main"
+
+# Set false for a cluster with nothing on it at all.
+# clone_repo = true
