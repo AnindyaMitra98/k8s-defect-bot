@@ -82,8 +82,12 @@ Terraform writes the private key to `.ssh/kdb-test.pem` with `file_permission =
 
 ```powershell
 terraform output fix_key_permissions    # prints the exact command
-icacls .\.ssh\kdb-test.pem /inheritance:r /grant:r "$env:USERNAME:R"
+icacls .\.ssh\kdb-test.pem /inheritance:r /grant:r "${env:USERNAME}:R"
 ```
+
+The braces are load-bearing. Unbraced, PowerShell reads `USERNAME:R` as the
+variable name inside the `env:` drive, finds nothing, and hands `icacls` an empty
+principal — so the ACL is never reset and SSH keeps failing with the same error.
 
 ## Install the bot
 

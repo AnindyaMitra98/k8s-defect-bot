@@ -20,7 +20,12 @@ output "ssh_command" {
 
 output "fix_key_permissions" {
   description = "Run this once, in PowerShell, before the first ssh. Terraform's file_permission is a no-op on NTFS."
-  value       = "icacls ${replace(local_sensitive_file.ssh_key.filename, "/", "\\")} /inheritance:r /grant:r \"$env:USERNAME:R\""
+  # $${env:USERNAME} renders as ${env:USERNAME}: the doubled $ escapes Terraform's
+  # own interpolation. The braces then matter to PowerShell -- unbraced,
+  # $env:USERNAME:R parses as the variable "USERNAME:R" in the env: drive, which
+  # does not exist, so icacls receives an empty principal and silently grants
+  # nothing. The key stays unreadable and ssh keeps refusing it.
+  value = "icacls ${replace(local_sensitive_file.ssh_key.filename, "/", "\\")} /inheritance:r /grant:r \"$${env:USERNAME}:R\""
 }
 
 output "kubeconfig_command" {
