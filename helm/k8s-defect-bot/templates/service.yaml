@@ -8,7 +8,7 @@ metadata:
 spec:
   type: {{ .Values.service.type }}
   selector:
-    {{- include "k8s-defect-bot.selectorLabels" . | nindent 4 }}
+    {{- include "k8s-defect-bot.collectorSelectorLabels" . | nindent 4 }}
   ports:
     - name: http
       port: {{ .Values.service.port }}
