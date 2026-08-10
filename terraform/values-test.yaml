@@ -1,0 +1,96 @@
+# Helm values for the k3s test cluster.
+#
+# Terraform never reads this file -- it is here for the manual install step in
+# README.md. What it captures is the handful of settings that are *wrong* by
+# default on k3s and fail quietly rather than loudly.
+#
+# These are test-environment choices, not production ones. ../usage.md and
+# ../helm/k8s-defect-bot/values-baremetal.yaml cover deploying for real.
+
+image:
+  repository: k8s-defect-bot
+  tag: "0.3.0"
+  # The image is built on this node and imported straight into k3s's containerd.
+  # There is no registry, so a pullPolicy of Always would fail every time.
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+config:
+  clusterName: kdb-test-k3s
+  # dashboardUrl is set with --set at install time -- it needs the public IP.
+  # Shorter than the 300s default so the cluster reacts while you are watching it.
+  scanIntervalSeconds: 120
+  logLevel: INFO
+
+auth:
+  enabled: true
+  # Left empty on purpose: the chart then generates an admin password, stores it
+  # in the users Secret, and reuses it across upgrades. `helm install` prints how
+  # to read it back. That is better than passing a password on the command line,
+  # where it lands in shell history.
+  users: []
+  defaultAdminEmail: admin@example.com
+  # The dashboard is plain HTTP here. With this true the browser accepts the
+  # session cookie and then refuses to send it back, so sign-in appears to
+  # succeed and every subsequent request is unauthenticated.
+  sessionCookieSecure: false
+
+notifications:
+  enabled: false
+
+llm:
+  provider: none
+
+nodeAgent:
+  enabled: true
+  # Faster than the 120s default so /api/nodes populates while you watch.
+  intervalSeconds: 60
+  # THE setting to get right on k3s. The chart default
+  # /run/containerd/containerd.sock is a kubeadm path; k3s does not use it, and
+  # without this override node_container_runtime reports critical on every node
+  # -- which looks like a real defect and is not.
+  containerRuntimeSocket: /run/k3s/containerd/containerd.sock
+  tolerateAll: true
+  resources:
+    requests:
+      cpu: 10m
+      memory: 48Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+service:
+  type: ClusterIP
+  port: 80
+
+# k3s bundles Traefik, so an Ingress is the least-effort way to get a real URL.
+# nip.io resolves <ip>.nip.io to that IP, which avoids needing a DNS record.
+# ingress.host is set with --set at install time.
+ingress:
+  enabled: true
+  className: traefik
+  path: /
+  pathType: Prefix
+
+# k3s ships Flannel, which accepts NetworkPolicy objects and enforces none of
+# them. Enabling this would give the appearance of protection and none of the
+# substance. The EC2 security group is what actually restricts access here.
+networkPolicy:
+  enabled: false
+
+# Sized for a 2 GiB node that is also running k3s and, occasionally, a container
+# build. Raise the limit if you point this at a cluster with thousands of pods --
+# a whole snapshot is held in memory at once.
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 384Mi
+
+rbac:
+  create: true
+  # Only useful on clusters older than 1.22. k3s here is far newer.
+  includeLegacyExtensions: false

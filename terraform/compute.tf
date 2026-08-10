@@ -1,6 +1,7 @@
 locals {
-  # ARM instance families are materially cheaper, so the AMI architecture follows
-  # the instance type rather than being another thing to keep in sync.
+  # ARM instance families are materially cheaper, so the AMI architecture
+  # follows the instance type rather than being a second variable to keep in
+  # sync. Matches t4g/c7g/m7g/... but not t3/t3a/m5.
   architecture = can(regex("^[a-z][0-9]+g[a-z]*\\.", var.instance_type)) ? "arm64" : "amd64"
 }
 
@@ -9,7 +10,9 @@ data "aws_ami" "ubuntu" {
   owners      = ["099720109477"] # Canonical
 
   filter {
-    name   = "name"
+    name = "name"
+    # hvm-ssd* rather than hvm-ssd: Canonical publishes amd64 under
+    # hvm-ssd-gp3 and arm64 under hvm-ssd, and the glob covers both.
     values = ["ubuntu/images/hvm-ssd*/ubuntu-noble-24.04-${local.architecture}-server-*"]
   }
 
@@ -19,6 +22,8 @@ data "aws_ami" "ubuntu" {
   }
 }
 
+# Generated per-apply rather than reusing a key from your account: destroy then
+# leaves nothing behind, and the key never outlives the cluster it opens.
 resource "tls_private_key" "ssh" {
   algorithm = "RSA"
   rsa_bits  = 4096
@@ -30,8 +35,11 @@ resource "aws_key_pair" "this" {
 }
 
 resource "local_sensitive_file" "ssh_key" {
-  content         = tls_private_key.ssh.private_key_pem
-  filename        = "${path.module}/.ssh/${var.name_prefix}.pem"
+  content  = tls_private_key.ssh.private_key_pem
+  filename = "${path.module}/.ssh/${var.name_prefix}.pem"
+  # POSIX-only, and a no-op on NTFS. On Windows, OpenSSH will still refuse this
+  # key as UNPROTECTED PRIVATE KEY FILE until you fix the ACL -- README.md has
+  # the icacls command.
   file_permission = "0600"
 }
 
@@ -46,9 +54,13 @@ resource "aws_instance" "node" {
   user_data = templatefile("${path.module}/templates/cloud-init.yaml.tftpl", {
     k3s_version = var.k3s_version
     node_name   = var.name_prefix
+    clone_repo  = var.clone_repo
+    repo_url    = var.repo_url
+    repo_branch = var.repo_branch
   })
 
-  # Changing the bootstrap means the node must be rebuilt -- k3s installs once.
+  # cloud-init runs once, on first boot. Changing the bootstrap therefore means
+  # rebuilding the node -- which is also the documented way to pick up new code.
   user_data_replace_on_change = true
 
   metadata_options {
