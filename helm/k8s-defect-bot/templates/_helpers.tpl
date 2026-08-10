@@ -27,6 +27,19 @@ app.kubernetes.io/name: {{ include "k8s-defect-bot.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
+{{/*
+Collector-only selector. The bare selectorLabels above are shared by BOTH
+workloads, so anything selecting on them alone also matches the node-agent
+DaemonSet's pods -- which made `kubectl logs deploy/<release>` return agent logs,
+and left the Service one named-port coincidence away from load-balancing
+dashboard traffic onto an agent. Select the collector with this, never with
+selectorLabels directly. Mirrors agentSelectorLabels below.
+*/}}
+{{- define "k8s-defect-bot.collectorSelectorLabels" -}}
+{{ include "k8s-defect-bot.selectorLabels" . }}
+app.kubernetes.io/component: collector
+{{- end -}}
+
 {{- define "k8s-defect-bot.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create -}}
 {{- default (include "k8s-defect-bot.fullname" .) .Values.serviceAccount.name -}}

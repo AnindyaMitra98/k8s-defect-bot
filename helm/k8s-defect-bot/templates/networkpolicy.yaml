@@ -18,7 +18,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      {{- include "k8s-defect-bot.selectorLabels" . | nindent 6 }}
+      {{- include "k8s-defect-bot.collectorSelectorLabels" . | nindent 6 }}
   policyTypes:
     - Ingress
   ingress:
